@@ -30,7 +30,13 @@ scraper_debug.log
 
 # Project specific
 projects/
+manual_projects/
+manual_translations/
 temp_translate_in.txt
+temp_single_translate.txt
+
+# Logs
+scraper_logs/
 
 # OS
 .DS_Store
