@@ -953,6 +953,26 @@ def manual_translate_chapter(project_id, filename):
     if guide_text:
         print(f"  [*] Translation guide found — will be applied.\n")
 
+    # Load & inject chapter context (rolling summary + arc + mood)
+    ch_ctx = pm.load_chapter_context(project_id)
+    summaries = ch_ctx.get("chapter_summaries", [])
+    if summaries or ch_ctx.get("current_arc") or ch_ctx.get("recent_characters_active"):
+        ctx_lines = ["\n=== STORY CONTEXT (for continuity) ==="]
+        if ch_ctx.get("current_arc"):
+            ctx_lines.append(f"Current arc: {ch_ctx['current_arc']}")
+        if ch_ctx.get("mood"):
+            ctx_lines.append(f"Story mood: {ch_ctx['mood']}")
+        if ch_ctx.get("recent_characters_active"):
+            ctx_lines.append(f"Active characters: {', '.join(ch_ctx['recent_characters_active'])}")
+        if summaries:
+            ctx_lines.append("Recent chapter summaries (last 3):")
+            for s in summaries[-3:]:
+                ctx_lines.append(f"  - {s.get('chapter','?')}: {s.get('summary','')}")
+        ctx_lines.append("=== END STORY CONTEXT ===\n")
+        story_context_block = "\n".join(ctx_lines)
+        guide_text = story_context_block + guide_text
+        print(f"  [*] Story context loaded ({len(summaries)} summaries, arc: {ch_ctx.get('current_arc','')[:50]}...)\n")
+
     # Step 1: Gemini analyzes new chapter → update reference
     if engine_mode == "ollama":
         print("[1/3] Entity analysis skipped (Ollama-only mode)...")
@@ -1034,6 +1054,31 @@ def manual_translate_chapter(project_id, filename):
     save_path = pm.save_manual_chapter_translated(project_id, filename, translated)
     print(f"     Saved: {save_path}")
 
+    # Step 4: Generate rolling summary & update chapter_context.json
+    novel_title = meta.get("title", project_id)
+    ch_ctx = pm.load_chapter_context(project_id)
+    print(f"\n[*] Generating chapter summary for context memory...")
+    summary_data = tr.generate_chapter_summary(
+        translated_text=translated,
+        chapter_name=filename,
+        novel_title=novel_title,
+        target_lang=target,
+        existing_context=ch_ctx,
+    )
+    if summary_data:
+        ch_ctx["last_translated"] = filename
+        ch_ctx["current_arc"]     = summary_data.get("current_arc", ch_ctx.get("current_arc", ""))
+        ch_ctx["mood"]            = summary_data.get("mood", ch_ctx.get("mood", ""))
+        ch_ctx["recent_characters_active"] = summary_data.get("recent_characters_active", [])
+        summaries = ch_ctx.get("chapter_summaries", [])
+        summaries.append({"chapter": filename, "summary": summary_data.get("summary", "")})
+        ch_ctx["chapter_summaries"] = summaries
+        pm.save_chapter_context(project_id, ch_ctx)
+        print(f"     Summary: {summary_data.get('summary','')[:100]}...")
+        print(f"     Arc    : {ch_ctx['current_arc'][:80]}...")
+    else:
+        print("     [!] Summary skipped (Gemini unavailable or Ollama-only mode).")
+
     # Preview
     print("\n" + "=" * 56)
     print(f"  PREVIEW — {filename}")
@@ -1048,6 +1093,7 @@ def manual_translate_chapter(project_id, filename):
         clear_screen()
         print(tail_log(40))
         input("\nPress Enter...")
+
 
 
 def generate_alt_titles(project_id):

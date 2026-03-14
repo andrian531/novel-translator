@@ -292,6 +292,35 @@ def save_manual_chapter_translated(project_id, filename, text):
     return path
 
 
+def load_chapter_context(project_id):
+    """
+    Muat chapter_context.json — memori naratif ringan per-project.
+    Berisi: last_translated, chapter_summaries (rolling 5 terakhir),
+            current_arc, mood, recent_characters_active.
+    """
+    f = os.path.join(_manual_dir(project_id), "chapter_context.json")
+    if not os.path.exists(f):
+        return {
+            "last_translated": None,
+            "chapter_summaries": [],   # list of {chapter, summary}
+            "current_arc": "",
+            "mood": "",
+            "recent_characters_active": [],
+        }
+    return _read_json(f)
+
+
+def save_chapter_context(project_id, context):
+    """Simpan chapter_context.json. Jaga rolling summaries max 5 entry."""
+    # Pastikan summaries tidak lebih dari 5
+    summaries = context.get("chapter_summaries", [])
+    if len(summaries) > 5:
+        context["chapter_summaries"] = summaries[-5:]
+    f = os.path.join(_manual_dir(project_id), "chapter_context.json")
+    _write_json(f, context)
+    logger.info(f"[Manual] chapter_context.json diperbarui: last={context.get('last_translated','-')}")
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

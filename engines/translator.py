@@ -792,3 +792,61 @@ def dedup_reference(ref):
         ref[section] = clean
 
     return ref
+
+
+def generate_chapter_summary(translated_text, chapter_name, novel_title,
+                              target_lang, existing_context=None):
+    """
+    Minta Gemini buat ringkasan naratif singkat dari chapter yang baru diterjemahkan.
+    Output JSON dengan: summary, current_arc, mood, recent_characters_active.
+    Kembalikan dict atau None jika Gemini tidak merespons.
+    """
+    prev_arc = ""
+    if existing_context:
+        prev_arc = existing_context.get("current_arc", "")
+
+    arc_hint = f"\nPrevious arc context: {prev_arc}" if prev_arc else ""
+
+    prompt = (
+        f"You are a literary analyst helping track narrative context for a novel translation project.\n"
+        f"Novel: {novel_title}\n"
+        f"Chapter: {chapter_name}"
+        f"{arc_hint}\n\n"
+        f"Read this translated chapter excerpt and return ONLY a valid JSON object — no markdown, no explanation:\n"
+        f"{{\n"
+        f'  "summary": "1-2 sentence summary of what happened in this chapter",\n'
+        f'  "current_arc": "brief description of the ongoing story arc after this chapter",\n'
+        f'  "mood": "comma-separated tones, e.g. tense, comedic, emotional",\n'
+        f'  "recent_characters_active": ["Name1", "Name2"]\n'
+        f"}}\n\n"
+        f"Rules:\n"
+        f"- summary and current_arc: write in {target_lang}\n"
+        f"- mood: English keywords only (e.g. tense, comedic, romantic, action-packed)\n"
+        f"- recent_characters_active: use the TRANSLATED names (from the reference), max 5 names\n"
+        f"- Be concise — the summary is used as context for the NEXT chapter translation\n\n"
+        f"Chapter text (first 3000 chars):\n{translated_text[:3000]}"
+    )
+
+    logger.info(f"[Gemini] Generating chapter summary for {chapter_name}...")
+    raw = _run_gemini(prompt, timeout=60)
+    if not raw:
+        logger.warning("[Gemini] No response for chapter summary.")
+        return None
+
+    match = re.search(r"\{[\s\S]*\}", raw)
+    if not match:
+        logger.warning(f"[Gemini] No JSON in summary output: {raw[:200]}")
+        return None
+
+    try:
+        data = json.loads(match.group())
+        data.setdefault("summary", "")
+        data.setdefault("current_arc", "")
+        data.setdefault("mood", "")
+        data.setdefault("recent_characters_active", [])
+        logger.info(f"[Gemini] Chapter summary OK: {data.get('summary','')[:80]}...")
+        return data
+    except json.JSONDecodeError as e:
+        logger.error(f"[Gemini] Failed to parse summary JSON: {e}")
+        return None
+
