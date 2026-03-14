@@ -19,9 +19,20 @@ _CENSORED_PHRASES = [
     "unable to translate",
 ]
 
-_PREFERRED_ORDER = [
-    "gemma3", "gemma2", "gemma",
-]
+# Note: NLLB dipanggil via _run_nllb() sebagai fallback terakhir — BUKAN via Ollama
+
+# Prioritas model per bahasa sumber.
+# Urutan: model khusus bahasa itu → model multilingual umum → dolphin/mistral
+_LANG_MODEL_HINTS = {
+    # Chinese: qwen is purpose-built for Mandarin — top priority
+    "chinese":   ["qwen2.5", "qwen2", "qwen", "yi", "baichuan", "chatglm"],
+    "mandarin":  ["qwen2.5", "qwen2", "qwen", "yi", "baichuan", "chatglm"],
+    # Japanese: JP-specific models first, qwen as decent fallback
+    "japanese":  ["aya", "suzume", "japanese", "qwen2.5", "qwen2", "qwen"],
+    # Korean: KR-specific models first, qwen as decent fallback
+    "korean":    ["exaone", "korean", "aya", "qwen2.5", "qwen2", "qwen"],
+}
+_GENERAL_ORDER = ["gemma3", "gemma2", "gemma", "qwen2.5", "qwen2", "qwen"]
 _DOLPHIN_ORDER = [
     "dolphin-mistral", "dolphin-llama3", "dolphin-llama", "dolphin",
     "mistral",
@@ -32,8 +43,11 @@ _DOLPHIN_ORDER = [
 # Ollama helpers
 # ---------------------------------------------------------------------------
 
-def get_available_models():
-    """Kembalikan list model Ollama yang terinstall, urut prioritas."""
+def get_available_models(source_lang="Chinese"):
+    """
+    Kembalikan list model Ollama yang terinstall, diurutkan berdasarkan bahasa sumber.
+    Model khusus bahasa sumber diprioritaskan, lalu model umum, lalu dolphin/mistral.
+    """
     try:
         r = requests.get("http://localhost:11434/api/tags", timeout=5)
         if r.status_code != 200:
@@ -41,14 +55,21 @@ def get_available_models():
         raw = [m["name"] for m in r.json().get("models", [])]
         logger.info(f"[Ollama] Model tersedia: {raw}")
 
+        lang_hints = _LANG_MODEL_HINTS.get(source_lang.lower(), _GENERAL_ORDER)
+        n_hints    = len(lang_hints)
+        n_general  = len(_GENERAL_ORDER)
+
         def _rank(name):
             base = name.split(":")[0].lower()
-            for i, p in enumerate(_PREFERRED_ORDER):
+            for i, p in enumerate(lang_hints):
                 if p in base:
-                    return i
+                    return i                          # 0..n_hints-1
+            for i, p in enumerate(_GENERAL_ORDER):
+                if p in base:
+                    return n_hints + i               # n_hints..
             for i, p in enumerate(_DOLPHIN_ORDER):
                 if p in base:
-                    return len(_PREFERRED_ORDER) + i
+                    return n_hints + n_general + i   # last tier
             return 999
 
         return sorted(raw, key=_rank)
@@ -72,6 +93,68 @@ def _has_untranslated_cjk(text):
         or '\uac00' <= c <= '\ud7af'   # Hangul
     )
     return count > 3
+
+
+# ---------------------------------------------------------------------------
+# NLLB fallback (facebook/nllb-200-distilled-600M via transformers)
+# ---------------------------------------------------------------------------
+
+_NLLB_LANG_MAP = {
+    "chinese": "zho_Hans", "mandarin": "zho_Hans",
+    "simplified chinese": "zho_Hans", "traditional chinese": "zho_Hant",
+    "japanese": "jpn_Jpn", "korean": "kor_Hang",
+    "indonesian": "ind_Latn", "indonesia": "ind_Latn", "id": "ind_Latn",
+    "english": "eng_Latn", "malay": "zsm_Latn",
+}
+_nllb_tokenizer = None
+_nllb_model     = None
+
+
+def _load_nllb():
+    """Muat model NLLB secara lazy. Return (tokenizer, model) atau (None, None)."""
+    global _nllb_tokenizer, _nllb_model
+    if _nllb_tokenizer is not None:
+        return _nllb_tokenizer, _nllb_model
+    try:
+        from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+        _model_id = "facebook/nllb-200-distilled-600M"
+        logger.info(f"[NLLB] Memuat model {_model_id} ...")
+        _nllb_tokenizer = AutoTokenizer.from_pretrained(_model_id)
+        _nllb_model     = AutoModelForSeq2SeqLM.from_pretrained(_model_id)
+        logger.info("[NLLB] Model siap.")
+        return _nllb_tokenizer, _nllb_model
+    except Exception as e:
+        logger.warning(f"[NLLB] Tidak bisa memuat model: {e}")
+        return None, None
+
+
+def _run_nllb(text, source_lang="Chinese", target_lang="Indonesian"):
+    """
+    Terjemahkan teks dengan NLLB sebagai fallback terakhir.
+    Pure translation — tidak mengikuti instruksi/reference, hanya menerjemahkan teks mentah.
+    """
+    tokenizer, model = _load_nllb()
+    if tokenizer is None:
+        return None
+    src_code = _NLLB_LANG_MAP.get(source_lang.lower(), "zho_Hans")
+    tgt_code = _NLLB_LANG_MAP.get(target_lang.lower(), "ind_Latn")
+    try:
+        import torch
+        tokenizer.src_lang = src_code
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+        tgt_lang_id = tokenizer.convert_tokens_to_ids(tgt_code)
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                forced_bos_token_id=tgt_lang_id,
+                max_length=1024,
+                num_beams=4,
+            )
+        result = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return result.strip() or None
+    except Exception as e:
+        logger.warning(f"[NLLB] Error saat terjemah: {e}")
+        return None
 
 
 def _run_ollama(model, prompt, timeout=120):
@@ -153,6 +236,7 @@ def translate_chapter(raw_text, reference, target_lang, models=None):
 
 def _run_gemini(prompt, timeout=60):
     """Jalankan gemini CLI dan kembalikan stdout atau None."""
+    tok_in = len(prompt) // 4
     try:
         result = subprocess.run(
             "gemini",
@@ -164,6 +248,8 @@ def _run_gemini(prompt, timeout=60):
             encoding="utf-8",
         )
         if result.returncode == 0 and result.stdout.strip():
+            tok_out = len(result.stdout.strip()) // 4
+            logger.info(f"[Gemini] ~{tok_in} token in / ~{tok_out} token out (estimasi)")
             return result.stdout.strip()
         logger.warning(f"[Gemini] returncode={result.returncode} stderr={result.stderr[:300]}")
     except subprocess.TimeoutExpired:
@@ -196,9 +282,12 @@ def analyze_chapter(raw_text):
         "  e.g. 东宫→'Dong Gong (Istana Timur)'. Meaning MUST be in target language, never English.\n"
         "  NEVER duplicate: do NOT write 'Kota Chang\\'an (Kota Chang\\'an)' or 'Era Wude (Era Wude)'.\n"
         "- terms: cultivation levels, titles, cultural concepts — write 'Romanized (Meaning in target lang)'.\n"
-        "  Meaning MUST be in target language, never English.\n"
-        "  Chinese internet slang with a good target-lang equivalent should be TRANSLATED, not kept.\n"
-        "  e.g. 躺平→'rebahan' (translate directly, no annotation needed).\n"
+        "  Meaning MUST be in target language, NEVER in English.\n"
+        "  EXCEPTION — Chinese internet slang with a good target-lang equivalent: translate DIRECTLY, no romanization.\n"
+        "  e.g. 躺平→'rebahan', 内卷→'persaingan ketat', 卷王→'Raja Kompetisi', 摸鱼→'bermalas-malasan',\n"
+        "       划水→'buang-buang waktu', 内耗→'konflik batin', 躺赢→'menang tanpa usaha'.\n"
+        "  WRONG: 'Tang Ping (rebahan)', 'Juan Wang (Raja Kompetisi)', 'Mo Yu (Slacking off)' — all wrong.\n"
+        "  RIGHT: just 'rebahan', 'Raja Kompetisi', 'bermalas-malasan' — no parentheses, no romanization.\n"
         "  Do NOT write near-identical pairs like 'System (Sistem)' or 'Mission (Misi)'.\n"
         "- modern_terms: ONLY English loanwords that should stay as English in translation.\n"
         "  e.g. 主播→'host/streamer', 弹幕→'live chat', 直播→'live stream', 系统→'System',\n"
@@ -280,9 +369,12 @@ def analyze_chapter_with_context(raw_text, context="", existing_reference=None):
         "  e.g. 东宫→'Dong Gong (Istana Timur)'. Meaning MUST be in target language, never English.\n"
         "  NEVER duplicate: do NOT write 'Kota Chang\\'an (Kota Chang\\'an)' or 'Era Wude (Era Wude)'.\n"
         "- terms: cultivation levels, titles, cultural concepts — write 'Romanized (Meaning in target lang)'.\n"
-        "  Meaning MUST be in target language, never English.\n"
-        "  Chinese internet slang with a good target-lang equivalent should be TRANSLATED, not kept.\n"
-        "  e.g. 躺平→'rebahan' (translate directly, no annotation needed).\n"
+        "  Meaning MUST be in target language, NEVER in English.\n"
+        "  EXCEPTION — Chinese internet slang with a good target-lang equivalent: translate DIRECTLY, no romanization.\n"
+        "  e.g. 躺平→'rebahan', 内卷→'persaingan ketat', 卷王→'Raja Kompetisi', 摸鱼→'bermalas-malasan',\n"
+        "       划水→'buang-buang waktu', 内耗→'konflik batin', 躺赢→'menang tanpa usaha'.\n"
+        "  WRONG: 'Tang Ping (rebahan)', 'Juan Wang (Raja Kompetisi)', 'Mo Yu (Slacking off)' — all wrong.\n"
+        "  RIGHT: just 'rebahan', 'Raja Kompetisi', 'bermalas-malasan' — no parentheses, no romanization.\n"
         "  Do NOT write near-identical pairs like 'System (Sistem)' or 'Mission (Misi)'.\n"
         "- modern_terms: ONLY English loanwords that should stay as English in translation.\n"
         "  e.g. 主播→'host/streamer', 直播→'live stream', 弹幕→'live chat', 系统→'System',\n"
@@ -387,13 +479,15 @@ def _split_by_paragraphs(text, max_chars=2000):
 
 def translate_with_ollama_only(raw_text, reference, target_lang,
                                ollama_models=None, chunk_size=2000,
-                               progress_cb=None, guide_text=""):
+                               progress_cb=None, guide_text="",
+                               source_lang="Chinese"):
     """
     Engine terjemahan Ollama saja (tanpa Gemini). Cocok saat Gemini rate-limited.
+    Fallback terakhir: NLLB jika semua Ollama masih ada CJK tersisa.
     Kembalikan (translated_text, stats) atau (None, None).
     """
     if ollama_models is None:
-        ollama_models = get_available_models()
+        ollama_models = get_available_models(source_lang)
     if not ollama_models:
         logger.error("[Translate/Ollama] Tidak ada model tersedia.")
         return None, None
@@ -425,13 +519,16 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
     for i, chunk in enumerate(chunks, 1):
         prompt = (
             f"You are translating a web novel chapter into {target_lang}.\n"
+            f"OUTPUT MUST BE IN {target_lang} ONLY. Do NOT output in English or any other language.\n"
             f"{guide_block}\n"
             f"REFERENCE — proper nouns, do NOT translate as common words:\n{ref_block}\n\n"
             f"{modern_rule}"
-            f"Translate ONLY the text below. Output ONLY the translation, no notes:\n\n{chunk}"
+            f"Translate ONLY the text below into {target_lang}. Output ONLY the translation, no notes:\n\n{chunk}"
         )
         result, used, cjk_candidate = None, None, None
         for model in ollama_models:
+            if progress_cb:
+                progress_cb(i, total, f"▶ {model}...")
             r = _run_ollama(model, prompt)
             if r and not _is_censored(r):
                 if not _has_untranslated_cjk(r):
@@ -442,16 +539,27 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
                     logger.warning(f"[Translate/Ollama] Chunk {i}: {model} ada CJK tersisa → coba model berikutnya")
 
         if result is None and cjk_candidate:
-            result, used = cjk_candidate
-            logger.warning(f"[Translate/Ollama] Chunk {i}: semua model ada CJK di output, pakai {used}")
+            # Semua Ollama ada CJK → coba NLLB sebagai fallback terakhir
+            logger.warning(f"[Translate/Ollama] Chunk {i}: semua model ada CJK → coba NLLB")
+            nllb_out = _run_nllb(chunk, source_lang=source_lang, target_lang=target_lang)
+            if nllb_out and not _has_untranslated_cjk(nllb_out):
+                result, used = nllb_out, "NLLB"
+                logger.info(f"[Translate/Ollama] Chunk {i}: NLLB berhasil")
+            else:
+                result, used = cjk_candidate
+                logger.warning(f"[Translate/Ollama] Chunk {i}: NLLB juga gagal, pakai {used} (masih ada CJK)")
 
         if result:
             parts.append(result)
-            stats["ollama"] += 1
-            stats["ollama_model"] = used
-            engine = f"Ollama({used})"
+            if used == "NLLB":
+                stats["nllb"] = stats.get("nllb", 0) + 1
+                engine = "NLLB"
+            else:
+                stats["ollama"] += 1
+                stats["ollama_model"] = used
+                engine = f"Ollama({used})"
         else:
-            logger.error(f"[Translate/Ollama] Chunk {i}: semua model gagal")
+            logger.error(f"[Translate/Ollama] Chunk {i}: semua engine gagal")
             parts.append(f"[TRANSLATION FAILED — chunk {i}]")
             stats["failed"] += 1
             engine = "FAILED"
@@ -467,15 +575,17 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
 
 def translate_with_gemini_primary(raw_text, reference, target_lang,
                                    ollama_models=None, chunk_size=2000,
-                                   progress_cb=None, guide_text=""):
+                                   progress_cb=None, guide_text="",
+                                   source_lang="Chinese"):
     """
     Engine terjemahan utama: Gemini per chunk, fallback Ollama jika disensor/gagal.
+    Fallback terakhir: NLLB jika semua engine masih ada CJK tersisa.
     progress_cb(chunk_num, total, engine_label) → opsional untuk update progress di CLI.
     Kembalikan (translated_text, stats) atau (None, None).
-    stats = {"gemini": N, "ollama": N, "failed": N, "ollama_model": str|None}
+    stats = {"gemini": N, "ollama": N, "nllb": N, "failed": N, "ollama_model": str|None}
     """
     if ollama_models is None:
-        ollama_models = get_available_models()
+        ollama_models = get_available_models(source_lang)
 
     # Bangun blok referensi sekali untuk semua chunk
     ref_lines = []
@@ -496,7 +606,7 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
     chunks = _split_by_paragraphs(raw_text, chunk_size)
     total  = len(chunks)
     parts  = []
-    stats  = {"gemini": 0, "ollama": 0, "failed": 0, "ollama_model": None}
+    stats  = {"gemini": 0, "ollama": 0, "nllb": 0, "failed": 0, "ollama_model": None}
 
     logger.info(f"[Translate] {total} chunk(s) | target={target_lang}")
 
@@ -505,14 +615,14 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
     annotation_rule = (
         f"ANNOTATION RULE for locations & terms:\n"
         f"1. Annotate ONLY on FIRST occurrence. Later occurrences: no parentheses.\n"
-        f"2. Meaning in parentheses MUST be in {target_lang}, never in English.\n"
-        f"   WRONG: 'Tang Ping (Lying flat)' — CORRECT: 'Tang Ping (rebahan/santai total)'.\n"
+        f"2. Chinese slang or concepts with a good {target_lang} equivalent: translate DIRECTLY — no romanized form, no annotation.\n"
+        f"   e.g. 躺平→'rebahan', 内卷→'persaingan ketat' — NEVER write 'Tang Ping (rebahan)' or 'Tang Ping (Lying flat)'.\n"
         f"3. Geographic suffixes: translate directly, no annotation needed.\n"
         f"   城=Kota, 殿=Aula, 宫=Istana, 河/水=Sungai, 山=Gunung, 门=Gerbang.\n"
         f"   e.g. 'Kota Chang\\'an', 'Aula Xiande', 'Sungai Wei' — never keep suffix romanized.\n"
-        f"4. For concepts/objects (not just suffixes), use 'Romanized (Meaning)' on first occurrence.\n"
-        f"   e.g. 'Dong Gong (Istana Timur)', 'Dan Tian (Pusat Energi)'.\n"
-        f"5. WRONG: 'Era Wude (Era Wude)', 'System (Sistem)', 'Tang Ping (Lying flat)' — all wrong.\n"
+        f"4. For proper nouns / cultivation concepts with no direct translation, use 'Romanized (Meaning in {target_lang})' on first occurrence.\n"
+        f"   e.g. 'Dong Gong (Istana Timur)', 'Dan Tian (Pusat Energi)' — meaning MUST be in {target_lang}, never English.\n"
+        f"5. WRONG: 'Era Wude (Era Wude)', 'System (Sistem)', 'Tang Ping (rebahan)', 'Tang Ping (Lying flat)' — all wrong.\n"
     )
     modern_rule = _MODERN_TERMS_RULE if target_lang.lower() in ("indonesian", "indonesia", "id") else ""
 
@@ -524,11 +634,12 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
     for i, chunk in enumerate(chunks, 1):
         prompt = (
             f"You are translating a web novel chapter into {target_lang}.\n"
+            f"OUTPUT MUST BE IN {target_lang} ONLY. Do NOT output in English or any other language.\n"
             f"{guide_block}\n"
             f"REFERENCE — proper nouns, do NOT translate as common words:\n{ref_block}\n\n"
             f"{annotation_rule}\n"
             f"{modern_rule}"
-            f"Translate ONLY the text below. Output ONLY the translation, no notes:\n\n{chunk}"
+            f"Translate ONLY the text below into {target_lang}. Output ONLY the translation, no notes:\n\n{chunk}"
         )
 
         result, engine = None, "FAILED"
@@ -550,6 +661,8 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
         cjk_candidate = None
         if result is None:
             for model in (ollama_models or []):
+                if progress_cb:
+                    progress_cb(i, total, f"▶ {model}...")
                 r = _run_ollama(model, prompt)
                 if r and not _is_censored(r):
                     if not _has_untranslated_cjk(r):
@@ -571,12 +684,21 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
                 stats["gemini"] += 1
                 engine = "Gemini(klasik)"
             else:
-                # Pakai kandidat Ollama terbaik meski masih ada CJK
-                result, cjk_model = cjk_candidate
-                stats["ollama"] += 1
-                stats["ollama_model"] = cjk_model
-                engine = f"Ollama({cjk_model})"
-                logger.warning(f"[Translate] Chunk {i}: masih ada CJK di output, pakai {cjk_model}")
+                # Gemini classical juga gagal → coba NLLB sebagai fallback terakhir
+                logger.warning(f"[Translate] Chunk {i}: Gemini classical gagal → coba NLLB")
+                nllb_out = _run_nllb(chunk, source_lang=source_lang, target_lang=target_lang)
+                if nllb_out and not _has_untranslated_cjk(nllb_out):
+                    result = nllb_out
+                    stats["nllb"] += 1
+                    engine = "NLLB"
+                    logger.info(f"[Translate] Chunk {i}: NLLB berhasil")
+                else:
+                    # Pakai kandidat Ollama terbaik meski masih ada CJK
+                    result, cjk_model = cjk_candidate
+                    stats["ollama"] += 1
+                    stats["ollama_model"] = cjk_model
+                    engine = f"Ollama({cjk_model})"
+                    logger.warning(f"[Translate] Chunk {i}: masih ada CJK di output, pakai {cjk_model}")
 
         if result:
             parts.append(result)

@@ -734,8 +734,14 @@ def manual_research_project(project_id):
         f"  For places whose full name is meaningful (not just a suffix), use 'Romanized (Meaning)'.\n"
         f"  e.g. 东宫→'Dong Gong (Istana Timur)' because Dong=Timur adds meaning to the whole name.\n"
         f"  NEVER duplicate: do NOT write 'Kota Chang\\'an (Kota Chang\\'an)' or similar.\n"
-        f"- terms: write 'Romanized (Meaning in {tgt_lang})' only if meaning genuinely differs.\n"
-        f"  Do NOT write near-identical pairs like 'System (Sistem)'.\n"
+        f"- terms: cultivation levels, titles, cultural concepts — write 'Romanized (Meaning in {tgt_lang})'.\n"
+        f"  Meaning MUST be in {tgt_lang}, NEVER in English.\n"
+        f"  EXCEPTION — Chinese internet slang with a good {tgt_lang} equivalent: translate DIRECTLY, no romanization.\n"
+        f"  e.g. 躺平→'rebahan', 内卷→'persaingan ketat', 卷王→'Raja Kompetisi', 摸鱼→'bermalas-malasan',\n"
+        f"       划水→'buang-buang waktu', 内耗→'konflik batin', 躺赢→'menang tanpa usaha'.\n"
+        f"  WRONG: 'Tang Ping (rebahan)', 'Juan Wang (Raja Kompetisi)', 'Mo Yu (Slacking off)' — all wrong.\n"
+        f"  RIGHT: just 'rebahan', 'Raja Kompetisi', 'bermalas-malasan' — no parentheses, no romanization.\n"
+        f"  Do NOT write near-identical pairs like 'System (Sistem)' or 'Mission (Misi)'.\n"
         f"- modern_terms: internet/modern culture words specific to THIS novel that should STAY\n"
         f"  as English loanwords in {tgt_lang} translation. e.g. 主播→'host/streamer',\n"
         f"  直播→'live stream', 弹幕→'live chat', 系统→'System', 签到→'check-in',\n"
@@ -985,7 +991,9 @@ def manual_translate_chapter(project_id, filename):
     print(f"[2/3] Menerjemahkan... (~{chunks_est} chunk) | Engine: {engine_label}\n")
 
     def _progress(n, total, engine):
-        bar = "#" * n + "." * (total - n)
+        done = n - 1 if engine.startswith("▶") else n
+        bar = "#" * done + (">" if engine.startswith("▶") else "") + "." * (total - done - (1 if engine.startswith("▶") else 0))
+        bar = bar[:total]
         print(f"\r  [{bar}] {n}/{total} — {engine}      ", end="", flush=True)
 
     if engine_mode == "ollama":
