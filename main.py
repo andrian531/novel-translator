@@ -478,6 +478,31 @@ def manual_project_select():
             manual_project_menu(projects[idx])
 
 
+def _parse_chapter_selection(text, max_n):
+    """
+    Parse input chapter selection:
+      "3"       → [3]
+      "1-5"     → [1, 2, 3, 4, 5]
+      "1,3,5"   → [1, 3, 5]
+      "1-3,7,9" → [1, 2, 3, 7, 9]
+    Kembalikan list int yang sudah deduplicated dan terurut, atau [] jika invalid.
+    """
+    result = set()
+    parts = text.replace(" ", "").split(",")
+    for part in parts:
+        if "-" in part:
+            bounds = part.split("-")
+            if len(bounds) == 2 and bounds[0].isdigit() and bounds[1].isdigit():
+                lo, hi = int(bounds[0]), int(bounds[1])
+                if 1 <= lo <= hi <= max_n:
+                    result.update(range(lo, hi + 1))
+        elif part.isdigit():
+            n = int(part)
+            if 1 <= n <= max_n:
+                result.add(n)
+    return sorted(result)
+
+
 def manual_project_menu(project_id):
     """Menu utama project: refresh, pilih chapter, lihat reference."""
     while True:
@@ -565,8 +590,15 @@ def manual_project_menu(project_id):
             generate_alt_titles(project_id)
         elif cmd == 'i':
             generate_image_prompt(project_id)
-        elif cmd.isdigit() and chapters and 1 <= int(cmd) <= len(chapters):
-            manual_translate_chapter(project_id, chapters[int(cmd)-1])
+        else:
+            # Parse single number, range (1-5), or comma list (1,3,5)
+            selected = _parse_chapter_selection(cmd, len(chapters))
+            if selected and chapters:
+                valid = [i for i in selected if 1 <= i <= len(chapters)]
+                if len(valid) == 1:
+                    manual_translate_chapter(project_id, chapters[valid[0]-1])
+                elif len(valid) > 1:
+                    batch_translate_chapters(project_id, [chapters[i-1] for i in valid])
 
 
 def manual_research_project(project_id):
@@ -916,9 +948,14 @@ def _show_reference(ref):
     input("Press Enter...")
 
 
-def manual_translate_chapter(project_id, filename):
-    """Proses translate satu chapter: Gemini analisis → translate per chunk."""
-    clear_screen()
+def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=False):
+    """
+    Proses translate satu chapter: Gemini analisis → translate per chunk.
+    engine_mode: jika None, user diminta pilih. Jika sudah diisi (batch), langsung pakai.
+    batch_mode : jika True, skip preview interaktif dan langsung return.
+    """
+    if not batch_mode:
+        clear_screen()
     meta     = pm.load_manual_metadata(project_id)
     target   = meta.get("target_lang", "Indonesian")
 
@@ -926,25 +963,27 @@ def manual_translate_chapter(project_id, filename):
 
     raw_text = pm.load_raw_chapter(project_id, filename)
     if not raw_text:
-        print("[-] File not found.")
-        input("Press Enter...")
-        return
+        print(f"[-] {filename}: File not found or empty — skipped.")
+        if not batch_mode:
+            input("Press Enter...")
+        return False
 
     print(f"  Text: {len(raw_text)} characters")
     print(f"  Target: {target}\n")
 
-    # Select engine
-    print("Translation engine:")
-    print("  1. Gemini + Ollama fallback  (Gemini analyzes, Ollama translates — token efficient)")
-    print("  2. Ollama only               (local, offline, no rate limits)")
-    print("  3. Gemini only               (Gemini for everything — token heavy, rate limit risk)")
-    eng_c = input("Choice [1]: ").strip()
-    if eng_c == "2":
-        engine_mode = "ollama"
-    elif eng_c == "3":
-        engine_mode = "gemini_only"
-    else:
-        engine_mode = "gemini_fallback"
+    # Select engine — hanya jika belum ditentukan (single mode)
+    if engine_mode is None:
+        print("Translation engine:")
+        print("  1. Gemini + Ollama fallback  (Gemini analyzes, Ollama translates — token efficient)")
+        print("  2. Ollama only               (local, offline, no rate limits)")
+        print("  3. Gemini only               (Gemini for everything — token heavy, rate limit risk)")
+        eng_c = input("Choice [1]: ").strip()
+        if eng_c == "2":
+            engine_mode = "ollama"
+        elif eng_c == "3":
+            engine_mode = "gemini_only"
+        else:
+            engine_mode = "gemini_fallback"
     print()
 
     # Load translation guide if available
@@ -1040,9 +1079,10 @@ def manual_translate_chapter(project_id, filename):
     print()  # newline setelah progress bar
 
     if not translated:
-        print("\n[-] Translation failed entirely. Check scraper_logs/")
-        input("Press Enter...")
-        return
+        print(f"\n[-] {filename}: Translation failed entirely.")
+        if not batch_mode:
+            input("Press Enter...")
+        return False
 
     g = stats.get("gemini", 0)
     o = stats.get("ollama", 0)
@@ -1079,7 +1119,12 @@ def manual_translate_chapter(project_id, filename):
     else:
         print("     [!] Summary skipped (Gemini unavailable or Ollama-only mode).")
 
-    # Preview
+    if batch_mode:
+        print(f"\n[OK] {filename} done. Continuing batch...\n")
+        print("-" * 56)
+        return True
+
+    # Preview (single mode only)
     print("\n" + "=" * 56)
     print(f"  PREVIEW — {filename}")
     print("=" * 56)
@@ -1093,6 +1138,64 @@ def manual_translate_chapter(project_id, filename):
         clear_screen()
         print(tail_log(40))
         input("\nPress Enter...")
+    return True
+
+
+def batch_translate_chapters(project_id, chapter_list):
+    """
+    Terjemahkan beberapa chapter secara berurutan.
+    Semua pipeline tetap aktif: entity analysis, reference update, chapter context, rolling summary.
+    chapter_list: list of filename strings
+    """
+    clear_screen()
+    print("=" * 56)
+    print("  BATCH TRANSLATION")
+    print("=" * 56)
+    print(f"  Chapters to translate: {len(chapter_list)}")
+    for i, f in enumerate(chapter_list, 1):
+        print(f"  {i}. {f}")
+    print()
+
+    # Pilih engine sekali untuk semua chapter
+    print("Translation engine (applies to ALL chapters):")
+    print("  1. Gemini + Ollama fallback  (recommended)")
+    print("  2. Ollama only               (offline, no rate limits)")
+    print("  3. Gemini only               (token heavy)")
+    eng_c = input("Choice [1]: ").strip()
+    if eng_c == "2":
+        engine_mode = "ollama"
+    elif eng_c == "3":
+        engine_mode = "gemini_only"
+    else:
+        engine_mode = "gemini_fallback"
+
+    print(f"\n[*] Starting batch: {len(chapter_list)} chapters | engine={engine_mode}")
+    print("=" * 56)
+
+    ok, skipped, failed = 0, 0, 0
+    for i, filename in enumerate(chapter_list, 1):
+        print(f"\n[Batch {i}/{len(chapter_list)}] {filename}")
+        result = manual_translate_chapter(
+            project_id, filename,
+            engine_mode=engine_mode,
+            batch_mode=True,
+        )
+        if result is True:
+            ok += 1
+        elif result is False:
+            failed += 1
+        else:
+            skipped += 1
+
+    # Summary
+    print("\n" + "=" * 56)
+    print("  BATCH COMPLETE")
+    print("=" * 56)
+    print(f"  Done    : {ok}")
+    print(f"  Failed  : {failed}")
+    print(f"  Skipped : {skipped}")
+    print("=" * 56)
+    input("\nPress Enter to go back...")
 
 
 
