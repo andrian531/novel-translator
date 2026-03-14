@@ -10,31 +10,28 @@ def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def main_menu():
-    manager = ScraperManager()
+    # manager = ScraperManager()  # Scraper sementara dinonaktifkan
 
     while True:
         clear_screen()
         print("========================================")
         print("      NOVEL TRANSLATOR - CLI v0.2")
         print("========================================")
-        print("1. Discover Novels (Browse Sites)")
-        print("2. Initialize Project from URL")
-        print("3. Manual Translate (Paste Teks)")
-        print("4. Manage Existing Projects")
-        print("5. Exit")
+        print("  1. New Translate Project")
+        print("  2. Manage Projects")
+        print("  ────────────────────────────────────")
+        print("  3. Exit")
+        print("")
+        print("  [Coming Soon] Discover Novels & Scraper")
         print("----------------------------------------")
 
         choice = input("Select an option: ").strip()
 
         if choice == '1':
-            browse_sites(manager)
+            manual_project_new()
         elif choice == '2':
-            init_project_from_url(manager)
+            manual_project_select()
         elif choice == '3':
-            manual_translate_menu()
-        elif choice == '4':
-            manage_projects()
-        elif choice == '5':
             print("Goodbye!")
             break
         else:
@@ -309,13 +306,13 @@ def manual_translate_menu():
     while True:
         clear_screen()
         print("=" * 52)
-        print("  MANUAL TRANSLATE")
+        print("  TRANSLATE")
         print("=" * 52)
-        print("1. Project Baru")
-        print("2. Project yang Ada")
-        print("3. Kembali")
+        print("1. New Project")
+        print("2. Existing Project")
+        print("3. Back")
         print("-" * 52)
-        c = input("Pilihan: ").strip()
+        c = input("Choice: ").strip()
         if c == '1':
             manual_project_new()
         elif c == '2':
@@ -327,33 +324,33 @@ def manual_translate_menu():
 def manual_project_new():
     """Wizard buat project manual baru."""
     clear_screen()
-    print("--- Project Baru ---\n")
+    print("--- New Project ---\n")
 
-    title = input("Judul novel (asli): ").strip()
+    title = input("Novel title (original): ").strip()
     if not title:
-        print("[-] Judul wajib diisi.")
+        print("[-] Title is required.")
         input("Press Enter...")
         return
 
-    print("Bahasa sumber: 1.Chinese  2.Japanese  3.Korean  4.Lain")
-    sc = input("Pilihan [1]: ").strip()
+    print("Source language: 1.Chinese  2.Japanese  3.Korean  4.Other")
+    sc = input("Choice [1]: ").strip()
     source_lang = {"2": "Japanese", "3": "Korean"}.get(sc, "Chinese")
     if sc == "4":
-        source_lang = input("Bahasa sumber: ").strip() or "Chinese"
+        source_lang = input("Source language: ").strip() or "Chinese"
 
-    print("Bahasa tujuan: 1.Indonesian  2.English  3.Lain")
-    tc = input("Pilihan [1]: ").strip()
+    print("Target language: 1.Indonesian  2.English  3.Other")
+    tc = input("Choice [1]: ").strip()
     target_lang = {"2": "English"}.get(tc, "Indonesian")
     if tc == "3":
-        target_lang = input("Bahasa tujuan: ").strip() or "Indonesian"
+        target_lang = input("Target language: ").strip() or "Indonesian"
 
-    synopsis = input("Sinopsis singkat (Enter untuk skip): ").strip()
-    source_url = input("URL sumber novel (Enter untuk skip): ").strip()
-    total_chapters_str = input("Jumlah total chapter (Enter untuk skip): ").strip()
+    synopsis = input("Short synopsis (Enter to skip): ").strip()
+    source_url = input("Source novel URL (Enter to skip): ").strip()
+    total_chapters_str = input("Total chapter count (Enter to skip): ").strip()
     total_chapters = int(total_chapters_str) if total_chapters_str.isdigit() and int(total_chapters_str) > 0 else 0
 
-    # Gemini suggest nama folder English
-    print("\n[*] Gemini membaca judul & sinopsis untuk menyarankan nama folder...\n")
+    # Gemini suggest English folder name
+    print("\n[*] Gemini is reading title & synopsis to suggest a folder name...\n")
     import re as _re
     slug_prompt = (
         f"You are helping name a novel translation project folder.\n"
@@ -377,35 +374,35 @@ def manual_project_new():
                 suggestions.append(m.group(1)[:40])
 
     if suggestions:
-        print("Pilih nama folder (Gemini merekomendasikan):\n")
+        print("Choose folder name (Gemini recommendations):\n")
         for i, s in enumerate(suggestions, 1):
             print(f"  {i}. {s}")
-        print(f"  {len(suggestions)+1}. Ketik sendiri")
+        print(f"  {len(suggestions)+1}. Type manually")
         print()
-        pick = input(f"Pilihan [1]: ").strip()
+        pick = input(f"Choice [1]: ").strip()
         if pick.isdigit() and 1 <= int(pick) <= len(suggestions):
             eng_name = suggestions[int(pick)-1]
         elif pick == str(len(suggestions)+1) or not pick.isdigit():
-            eng_name = input("Nama folder: ").strip()
+            eng_name = input("Folder name: ").strip()
         else:
             eng_name = suggestions[0]
     else:
-        print("Nama folder project (huruf Latin/Inggris, tanpa spasi).")
-        eng_name = input("Nama folder: ").strip()
+        print("Project folder name (Latin/English characters, no spaces).")
+        eng_name = input("Folder name: ").strip()
 
     if not eng_name:
         eng_name = _re.sub(r'[^\w]', '_', title[:20]).strip('_') or "novel"
     eng_name = _re.sub(r'[^\w\-]', '_', eng_name).strip('_')
 
-    print("\n[*] Membuat folder project...")
+    print("\n[*] Creating project folder...")
     project_id, path = pm.create_manual_project(
         title, source_lang, target_lang,
         synopsis=synopsis, english_name=eng_name, source_url=source_url
     )
 
-    # Jika ada sinopsis, Gemini bisa analisis dulu untuk reference awal
+    # If synopsis provided, Gemini can build initial reference
     if synopsis:
-        print("[*] Gemini menganalisis sinopsis untuk reference awal...")
+        print("[*] Gemini is analyzing synopsis for initial reference...")
         ctx = f"Novel title: {title}\nSynopsis: {synopsis}\n"
         entities = tr.analyze_chapter_with_context(synopsis, ctx)
         ref = pm.load_manual_reference(project_id)
@@ -415,30 +412,30 @@ def manual_project_new():
         chars = len(ref.get("characters", {}))
         locs  = len(ref.get("locations", {}))
         terms = len(ref.get("terms", {}))
-        print(f"     Reference awal: {chars} tokoh, {locs} lokasi, {terms} istilah")
+        print(f"     Initial reference: {chars} characters, {locs} locations, {terms} terms")
 
     raw_path = pm.get_raw_chapters_path(project_id)
-    print(f"\n[OK] Project dibuat!")
+    print(f"\n[OK] Project created!")
 
     if total_chapters > 0:
         created, _ = pm.scaffold_raw_chapters(project_id, total_chapters)
         pm.update_manual_metadata(project_id, {"total_chapters": total_chapters})
-        print(f"[OK] {created} file chapter kosong dibuat (chapter_001 … chapter_{str(total_chapters).zfill(max(3,len(str(total_chapters))))}.txt)")
+        print(f"[OK] {created} empty chapter files created (chapter_001 … chapter_{str(total_chapters).zfill(max(3,len(str(total_chapters))))}.txt)")
 
-    # Terjemahkan title + synopsis ke target_lang dan simpan di metadata
+    # Translate title + synopsis to target_lang and save in metadata
     if title or synopsis:
         _translate_metadata(project_id)
 
     if total_chapters == 0:
-        print(f"\n  Copy file chapter (.txt) ke folder:")
+        print(f"\n  Copy chapter files (.txt) to:")
         print(f"  {raw_path}")
-        print(f"\n  Setiap file = 1 chapter. Nama bebas, misal:")
-        print(f"    chapter_001.txt, ch01.txt, bab_1.txt, dst.")
+        print(f"\n  One file = one chapter. Any filename works, e.g.:")
+        print(f"    chapter_001.txt, ch01.txt, bab_1.txt, etc.")
     else:
-        print(f"\n  File chapter kosong sudah siap di:")
+        print(f"\n  Empty chapter files are ready at:")
         print(f"  {raw_path}")
-        print(f"  Isi konten chapter ke masing-masing file.")
-    input("\nPress Enter untuk masuk ke menu project...")
+        print(f"  Fill each file with the chapter content.")
+    input("\nPress Enter to open project menu...")
     manual_project_menu(project_id)
 
 
@@ -446,10 +443,10 @@ def manual_project_select():
     """Pilih project yang sudah ada."""
     while True:
         clear_screen()
-        print("--- Project yang Ada ---\n")
+        print("--- Existing Projects ---\n")
         projects = pm.list_manual_projects()
         if not projects:
-            print("Belum ada project manual.")
+            print("No projects found.")
             input("\nPress Enter...")
             return
 
@@ -470,8 +467,8 @@ def manual_project_select():
                 print(f"   {prev}")
             print()
 
-        print(f"\n{len(projects)+1}. Kembali")
-        c = input("\nPilih project: ").strip()
+        print(f"\n{len(projects)+1}. Back")
+        c = input("\nSelect project: ").strip()
         if not c.isdigit():
             continue
         idx = int(c) - 1
@@ -507,12 +504,12 @@ def manual_project_menu(project_id):
 
         chapters = pm.list_raw_chapters(project_id)
         if not chapters:
-            print(f"\n  Belum ada file chapter di raw/.")
-            print(f"  Copy file .txt ke:")
+            print(f"\n  No chapter files found in raw/.")
+            print(f"  Copy .txt files to:")
             print(f"  {raw_path}\n")
         else:
             print()
-            print("  [✓] sudah diterjemahkan  [x] file kosong  [ ] belum diterjemahkan")
+            print("  [✓] translated  [x] empty file  [ ] pending")
             print()
             for i, fname in enumerate(chapters, 1):
                 if pm.is_chapter_translated(project_id, fname):
@@ -530,8 +527,8 @@ def manual_project_menu(project_id):
         trans_mark    = "[✓]" if has_trans_meta else "[ ]"
         total_ch = meta.get("total_chapters", 0)
         total_mark = f" ({total_ch} ch)" if total_ch else ""
-        print(f"[R] Refresh  [V] Reference  [S] Riset {guide_mark}  [T] Terjemah Meta {trans_mark}")
-        print(f"[U] Update Jumlah Chapter{total_mark}  [G] Judul Alt  [I] Image Prompt  [B] Kembali")
+        print(f"[R] Refresh  [V] Reference  [S] Research {guide_mark}  [T] Translate Meta {trans_mark}")
+        print(f"[U] Update Chapter Count{total_mark}  [G] Alt Titles  [I] Image Prompt  [B] Back")
         if chapters:
             print(f"[1-{len(chapters)}] Translate chapter")
         print("-" * 56)
@@ -549,20 +546,20 @@ def manual_project_menu(project_id):
             _translate_metadata(project_id)
         elif cmd == 'u':
             cur = meta.get("total_chapters", 0)
-            prompt_cur = f" (sekarang {cur})" if cur else ""
-            new_total_str = input(f"Jumlah total chapter{prompt_cur}: ").strip()
+            prompt_cur = f" (current: {cur})" if cur else ""
+            new_total_str = input(f"Total chapter count{prompt_cur}: ").strip()
             if new_total_str.isdigit() and int(new_total_str) > 0:
                 new_total = int(new_total_str)
                 created, deleted = pm.scaffold_raw_chapters(project_id, new_total)
                 pm.update_manual_metadata(project_id, {"total_chapters": new_total})
-                msg = f"[OK] Total: {new_total} chapter."
+                msg = f"[OK] Total: {new_total} chapters."
                 if created:
-                    msg += f" +{created} file baru dibuat."
+                    msg += f" +{created} new files created."
                 if deleted:
-                    msg += f" -{deleted} file kosong dihapus."
+                    msg += f" -{deleted} empty files deleted."
                 print(msg)
             else:
-                print("[-] Input tidak valid.")
+                print("[-] Invalid input.")
             input("Press Enter...")
         elif cmd == 'g':
             generate_alt_titles(project_id)
@@ -587,16 +584,16 @@ def manual_research_project(project_id):
     chapters = pm.list_raw_chapters(project_id)
 
     print("=" * 56)
-    print("  RISET PROJECT")
+    print("  PROJECT RESEARCH")
     print("=" * 56)
     print(f"  Novel : {title}")
-    print(f"  Bahasa: {src_lang} → {tgt_lang}")
-    print(f"  Chapter tersedia: {len(chapters)}")
+    print(f"  Lang  : {src_lang} → {tgt_lang}")
+    print(f"  Available chapters: {len(chapters)}")
     print()
 
     if not chapters and not synopsis:
-        print("[-] Tidak ada chapter raw dan sinopsis kosong.")
-        print("    Copy chapter ke raw/ atau isi sinopsis dulu.")
+        print("[-] No raw chapters and synopsis is empty.")
+        print("    Copy chapters to raw/ or fill in the synopsis first.")
         input("Press Enter...")
         return
 
@@ -649,18 +646,18 @@ def manual_research_project(project_id):
     if nonempty_chapters:
         selected = _select_spread(nonempty_chapters)
         n_all = len(nonempty_chapters)
-        print(f"[1/3] Memilih chapter untuk riset ({n_all} berisi konten dari {len(chapters)} total)...")
-        print(f"      Dipilih {len(selected)}: {', '.join(selected)}")
+        print(f"[1/3] Selecting chapters for research ({n_all} with content out of {len(chapters)} total)...")
+        print(f"      Selected {len(selected)}: {', '.join(selected)}")
     elif chapters:
         selected = []
-        print("[1/3] Semua chapter masih kosong — riset dari sinopsis saja.")
+        print("[1/3] All chapters are empty — researching from synopsis only.")
     else:
         selected = []
-        print("[1/3] Tidak ada chapter — riset dari sinopsis saja.")
+        print("[1/3] No chapters — researching from synopsis only.")
 
-    # ── TAHAP 2: Baca chapter terpilih + analisis komprehensif ───────────────
-    print("\n[2/3] Memuat chapter dan mengirim ke Gemini untuk analisis mendalam...")
-    print("      Harap tunggu — ini mungkin 1-2 menit.\n")
+    # ── PHASE 2: Read selected chapters + comprehensive analysis ─────────────
+    print("\n[2/3] Loading chapters and sending to Gemini for deep analysis...")
+    print("      Please wait — this may take 1-2 minutes.\n")
 
     content_parts = []
     if synopsis:
@@ -759,11 +756,11 @@ def manual_research_project(project_id):
     raw_output = tr._run_gemini(analysis_prompt, timeout=240)
 
     if not raw_output:
-        print("[-] Gemini tidak merespons. Cek koneksi atau coba lagi.")
+        print("[-] Gemini did not respond. Check connection or try again.")
         input("Press Enter...")
         return
 
-    print("[3/3] Memproses dan menyimpan hasil...\n")
+    print("[3/3] Processing and saving results...\n")
 
     # ── Parse 3 section ───────────────────────────────────────────────────────
     # Split by section headers
@@ -789,10 +786,10 @@ def manual_research_project(project_id):
     if new_entities:
         pm.save_manual_reference(project_id, new_entities)
         ref = new_entities
-        print("     [✓] Reference diperbarui (deduplicated oleh Gemini)")
+        print("     [✓] Reference updated (deduplicated by Gemini)")
     else:
         ref = pm.load_manual_reference(project_id)
-        print("     [!] Parse JSON gagal — reference lama dipertahankan")
+        print("     [!] JSON parse failed — old reference retained")
 
     # Simpan translation guide sebagai JSON + teks
     guide_obj = {
@@ -824,26 +821,26 @@ def manual_research_project(project_id):
 
     clear_screen()
     print("=" * 56)
-    print("  HASIL RISET PROJECT")
+    print("  RESEARCH RESULTS")
     print("=" * 56)
     print(report_text[:2000])
     if len(report_text) > 2000:
-        print(f"\n... (buka file untuk laporan lengkap)")
+        print(f"\n... (open file for full report)")
 
     if guide_text:
         print(f"\n{'─'*56}")
-        print("  PANDUAN TERJEMAHAN (akan dipakai di semua translate):")
+        print("  TRANSLATION GUIDE (will be used in all translations):")
         print("─" * 56)
         print(guide_text[:800])
         if len(guide_text) > 800:
             print("  ...")
 
     print(f"\n{'='*56}")
-    print(f"  Reference : {chars} tokoh | {locs} lokasi | {terms} istilah")
-    print(f"  Guide     : translation_guide.json tersimpan")
-    print(f"  Laporan   : {report_file}")
+    print(f"  Reference : {chars} characters | {locs} locations | {terms} terms")
+    print(f"  Guide     : translation_guide.json saved")
+    print(f"  Report    : {report_file}")
     print(f"{'='*56}")
-    input("\nPress Enter untuk kembali...")
+    input("\nPress Enter to go back...")
 
 
 def _translate_metadata(project_id):
@@ -876,7 +873,7 @@ def _translate_metadata(project_id):
     import re as _re
     m = _re.search(r'\{[\s\S]*\}', out)
     if not m:
-        print("[-] Tidak ada JSON dalam output Gemini.")
+        print("[-] No JSON found in Gemini output.")
         input("Press Enter...")
         return
 
@@ -889,14 +886,14 @@ def _translate_metadata(project_id):
             updates["synopsis_translated"] = data["synopsis"]
         if updates:
             pm.update_manual_metadata(project_id, updates)
-            print(f"     Judul   : {updates.get('title_translated', '-')}")
+            print(f"     Title   : {updates.get('title_translated', '-')}")
             syn_prev = updates.get("synopsis_translated", "")
-            print(f"     Sinopsis: {syn_prev[:120]}{'...' if len(syn_prev) > 120 else ''}")
-            print("[OK] Metadata terjemahan disimpan.")
+            print(f"     Synopsis: {syn_prev[:120]}{'...' if len(syn_prev) > 120 else ''}")
+            print("[OK] Translation metadata saved.")
         else:
-            print("[-] Tidak ada terjemahan yang ditemukan dalam output.")
+            print("[-] No translation found in output.")
     except json.JSONDecodeError:
-        print("[-] Gagal parse JSON dari Gemini.")
+        print("[-] Failed to parse JSON from Gemini.")
     input("Press Enter...")
 
 
@@ -904,15 +901,15 @@ def _show_reference(ref):
     clear_screen()
     print("--- Reference ---\n")
     for section, label in (
-        ("characters", "TOKOH"),
-        ("locations", "LOKASI"),
-        ("terms", "ISTILAH"),
-        ("modern_terms", "MODERN TERMS (tetap bahasa Inggris)"),
+        ("characters", "CHARACTERS"),
+        ("locations", "LOCATIONS"),
+        ("terms", "TERMS"),
+        ("modern_terms", "MODERN TERMS (kept as English loanwords)"),
     ):
         items = ref.get(section, {})
         if not items:
             continue
-        print(f"[{label}] ({len(items)} entri)")
+        print(f"[{label}] ({len(items)} entries)")
         for k, v in items.items():
             print(f"  {k} → {v}")
         print()
@@ -929,19 +926,19 @@ def manual_translate_chapter(project_id, filename):
 
     raw_text = pm.load_raw_chapter(project_id, filename)
     if not raw_text:
-        print("[-] File tidak ditemukan.")
+        print("[-] File not found.")
         input("Press Enter...")
         return
 
-    print(f"  Teks: {len(raw_text)} karakter")
+    print(f"  Text: {len(raw_text)} characters")
     print(f"  Target: {target}\n")
 
-    # Pilih engine
-    print("Engine terjemahan:")
-    print("  1. Gemini + Ollama fallback  (Gemini analisis, Ollama terjemah — hemat token)")
-    print("  2. Ollama saja               (lokal, offline, bebas limit)")
-    print("  3. Gemini saja               (Gemini untuk semua — boros token, risiko rate limit)")
-    eng_c = input("Pilihan [1]: ").strip()
+    # Select engine
+    print("Translation engine:")
+    print("  1. Gemini + Ollama fallback  (Gemini analyzes, Ollama translates — token efficient)")
+    print("  2. Ollama only               (local, offline, no rate limits)")
+    print("  3. Gemini only               (Gemini for everything — token heavy, rate limit risk)")
+    eng_c = input("Choice [1]: ").strip()
     if eng_c == "2":
         engine_mode = "ollama"
     elif eng_c == "3":
@@ -950,18 +947,18 @@ def manual_translate_chapter(project_id, filename):
         engine_mode = "gemini_fallback"
     print()
 
-    # Muat translation guide jika ada
+    # Load translation guide if available
     guide = pm.load_translation_guide(project_id)
     guide_text = guide.get("guide_text", "")
     if guide_text:
-        print(f"  [*] Translation guide ditemukan — akan digunakan.\n")
+        print(f"  [*] Translation guide found — will be applied.\n")
 
-    # Step 1: Gemini analisis chapter baru → update reference
+    # Step 1: Gemini analyzes new chapter → update reference
     if engine_mode == "ollama":
-        print("[1/3] Analisis entitas dilewati (mode Ollama-only)...")
+        print("[1/3] Entity analysis skipped (Ollama-only mode)...")
         ref = pm.load_manual_reference(project_id)
-        print(f"     Pakai ref yang ada: {len(ref.get('characters',{}))} tokoh, "
-              f"{len(ref.get('locations',{}))} lokasi, {len(ref.get('terms',{}))} istilah\n")
+        print(f"     Using existing ref: {len(ref.get('characters',{}))} characters, "
+              f"{len(ref.get('locations',{}))} locations, {len(ref.get('terms',{}))} terms\n")
     else:
         ctx = f"Novel title: {meta.get('title','')}\n"
         if guide_text:
@@ -977,18 +974,18 @@ def manual_translate_chapter(project_id, filename):
         new_locs   = len(ref.get("locations", {}))  - before_counts["locations"]
         new_terms  = len(ref.get("terms", {}))      - before_counts["terms"]
         new_mterms = len(ref.get("modern_terms", {})) - before_counts["modern_terms"]
-        print(f"     +{new_chars} tokoh, +{new_locs} lokasi, +{new_terms} istilah, +{new_mterms} modern terms")
-        print(f"     Total ref: {len(ref.get('characters',{}))} tokoh, "
-              f"{len(ref.get('locations',{}))} lokasi, {len(ref.get('terms',{}))} istilah, "
+        print(f"     +{new_chars} characters, +{new_locs} locations, +{new_terms} terms, +{new_mterms} modern terms")
+        print(f"     Total ref: {len(ref.get('characters',{}))} characters, "
+              f"{len(ref.get('locations',{}))} locations, {len(ref.get('terms',{}))} terms, "
               f"{len(ref.get('modern_terms',{}))} modern terms\n")
 
     # Step 2: Translate per chunk
     models = tr.get_available_models()
     chunks_est = max(1, len(raw_text) // 2000)
     engine_label = {"gemini_fallback": "Gemini + Ollama fallback",
-                    "gemini_only": "Gemini saja",
-                    "ollama": "Ollama lokal"}.get(engine_mode, engine_mode)
-    print(f"[2/3] Menerjemahkan... (~{chunks_est} chunk) | Engine: {engine_label}\n")
+                    "gemini_only": "Gemini only",
+                    "ollama": "Ollama local"}.get(engine_mode, engine_mode)
+    print(f"[2/3] Translating... (~{chunks_est} chunks) | Engine: {engine_label}\n")
 
     def _progress(n, total, engine):
         done = n - 1 if engine.startswith("▶") else n
@@ -1023,19 +1020,19 @@ def manual_translate_chapter(project_id, filename):
     print()  # newline setelah progress bar
 
     if not translated:
-        print("\n[-] Terjemahan gagal total. Cek scraper_logs/")
+        print("\n[-] Translation failed entirely. Check scraper_logs/")
         input("Press Enter...")
         return
 
     g = stats.get("gemini", 0)
     o = stats.get("ollama", 0)
     f = stats.get("failed", 0)
-    print(f"     Gemini: {g} chunk | Ollama: {o} chunk | Gagal: {f} chunk")
+    print(f"     Gemini: {g} chunks | Ollama: {o} chunks | Failed: {f} chunks")
 
-    # Step 3: Simpan
-    print(f"\n[3/3] Menyimpan...")
+    # Step 3: Save
+    print(f"\n[3/3] Saving...")
     save_path = pm.save_manual_chapter_translated(project_id, filename, translated)
-    print(f"     Disimpan: {save_path}")
+    print(f"     Saved: {save_path}")
 
     # Preview
     print("\n" + "=" * 56)
@@ -1044,9 +1041,9 @@ def manual_translate_chapter(project_id, filename):
     lines = translated.splitlines()
     print("\n".join(lines[:15]))
     if len(lines) > 15:
-        print(f"\n... ({len(lines)} baris — buka file untuk lengkapnya)")
+        print(f"\n... ({len(lines)} lines — open file for full content)")
 
-    print(f"\n[L] Lihat Log  [Enter] Kembali")
+    print(f"\n[L] View Log  [Enter] Back")
     if input("Choice: ").strip().lower() == 'l':
         clear_screen()
         print(tail_log(40))
@@ -1065,11 +1062,11 @@ def generate_alt_titles(project_id):
     ref      = pm.load_manual_reference(project_id)
 
     print("=" * 56)
-    print("  GENERATE JUDUL ALTERNATIF")
+    print("  GENERATE ALTERNATIVE TITLES")
     print("=" * 56)
     print(f"  Novel : {title}")
     print(f"  Target: {tgt_lang}\n")
-    print("[*] Meminta Gemini membuat judul alternatif...\n")
+    print("[*] Requesting Gemini to generate alternative titles...\n")
 
     # Kumpulkan konteks
     chars_sample = ", ".join(list(ref.get("characters", {}).values())[:6])
@@ -1097,24 +1094,24 @@ def generate_alt_titles(project_id):
 
     result = tr._run_gemini(prompt, timeout=90)
     if not result:
-        print("[-] Gemini tidak merespons.")
+        print("[-] Gemini did not respond.")
         input("Press Enter...")
         return
 
     clear_screen()
     print("=" * 56)
-    print("  JUDUL ALTERNATIF")
+    print("  ALTERNATIVE TITLES")
     print("=" * 56)
     print(result)
 
-    # Simpan
+    # Save
     raw_dir    = pm.get_raw_chapters_path(project_id)
     report_dir = os.path.join(os.path.dirname(raw_dir), "research")
     os.makedirs(report_dir, exist_ok=True)
     out_file = os.path.join(report_dir, "alternative_titles.txt")
     with open(out_file, "w", encoding="utf-8") as f:
-        f.write(f"JUDUL ALTERNATIF — {title}\n{'='*56}\n\n{result}")
-    print(f"\n[*] Disimpan: {out_file}")
+        f.write(f"ALTERNATIVE TITLES — {title}\n{'='*56}\n\n{result}")
+    print(f"\n[*] Saved: {out_file}")
     input("\nPress Enter...")
 
 
@@ -1137,11 +1134,11 @@ def generate_image_prompt(project_id):
     print("  1. Midjourney")
     print("  2. DALL-E / ChatGPT Image")
     print("  3. Stable Diffusion")
-    print("  4. Umum (semua platform)")
-    plat_c = input("Pilihan [1]: ").strip()
+    print("  4. General (all platforms)")
+    plat_c = input("Choice [1]: ").strip()
     platform = {"2": "DALL-E", "3": "Stable Diffusion", "4": "General"}.get(plat_c, "Midjourney")
 
-    print(f"\n[*] Meminta Gemini membuat image prompt untuk {platform}...\n")
+    print(f"\n[*] Requesting Gemini to generate image prompt for {platform}...\n")
 
     chars_detail = "\n".join(f"  {k}: {v}" for k, v in list(ref.get("characters", {}).items())[:5])
     locs_detail  = ", ".join(list(ref.get("locations", {}).values())[:4])
@@ -1170,7 +1167,7 @@ def generate_image_prompt(project_id):
 
     result = tr._run_gemini(prompt, timeout=120)
     if not result:
-        print("[-] Gemini tidak merespons.")
+        print("[-] Gemini did not respond.")
         input("Press Enter...")
         return
 
@@ -1180,14 +1177,14 @@ def generate_image_prompt(project_id):
     print("=" * 56)
     print(result)
 
-    # Simpan
+    # Save
     raw_dir    = pm.get_raw_chapters_path(project_id)
     report_dir = os.path.join(os.path.dirname(raw_dir), "research")
     os.makedirs(report_dir, exist_ok=True)
     out_file = os.path.join(report_dir, f"image_prompt_{platform.lower().replace(' ','_')}.txt")
     with open(out_file, "w", encoding="utf-8") as f:
         f.write(f"IMAGE PROMPT — {title} | Platform: {platform}\n{'='*56}\n\n{result}")
-    print(f"\n[*] Disimpan: {out_file}")
+    print(f"\n[*] Saved: {out_file}")
     input("\nPress Enter...")
 
 
@@ -1196,13 +1193,13 @@ def manage_projects():
     print("--- Active Projects ---")
     projects = pm.list_projects()
     if not projects:
-        print("Belum ada project.")
+        print("No projects found.")
     else:
         for i, p in enumerate(projects):
             meta = pm.load_metadata(p)
             title = meta.get("title", p)
             ch_count = meta.get("chapter_count", "?")
-            print(f"{i+1}. {title} ({ch_count} chapter) [{p}]")
+            print(f"{i+1}. {title} ({ch_count} chapters) [{p}]")
     input("\nPress Enter to return...")
 
 if __name__ == "__main__":
