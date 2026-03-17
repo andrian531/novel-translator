@@ -198,6 +198,7 @@ def load_manual_reference(project_id):
     ref.setdefault("locations", {})
     ref.setdefault("terms", {})
     ref.setdefault("modern_terms", {})
+    ref.setdefault("character_profiles", [])
     return ref
 
 

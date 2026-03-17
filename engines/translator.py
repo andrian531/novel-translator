@@ -302,10 +302,31 @@ def analyze_chapter(raw_text):
         '  "characters": {"ChineseName": "Pinyin"},\n'
         '  "locations": {"ChineseName": "Pinyin (Meaning)"},\n'
         '  "terms": {"ChineseTerm": "Romanized (Meaning) or equivalent"},\n'
-        '  "modern_terms": {"ChineseTerm": "English loanword"}\n'
+        '  "modern_terms": {"ChineseTerm": "English loanword"},\n'
+        '  "character_profiles": [\n'
+        '    {\n'
+        '      "original_name": "ChineseName",\n'
+        '      "romanized_name": "Pinyin",\n'
+        '      "age": 25,\n'
+        '      "gender": "male/female/unknown",\n'
+        '      "relationships": [\n'
+        '        {\n'
+        '          "with": "OtherCharacterRomanized",\n'
+        '          "call_them": "how this character addresses the other (e.g. 师兄/Kakak Seperguruan)",\n'
+        '          "they_call_me": "how the other addresses this character",\n'
+        '          "reason": "why — age, sect seniority, bet, contract, rank, family"\n'
+        '        }\n'
+        '      ]\n'
+        '    }\n'
+        '  ]\n'
         "}\n\n"
         "Rules:\n"
         "- characters: pinyin only, NEVER translate the meaning.\n"
+        "- character_profiles: only include characters who appear in this chapter.\n"
+        "  - age: integer if stated or clearly implied, else null.\n"
+        "  - relationships: only include if an honorific/kinship term is used between characters.\n"
+        "    Include bets/wagers that establish honorifics (e.g. loser must call winner 'grandpa').\n"
+        "  - If no relationships found for a character, use empty array [].\n"
         "- locations: translate geographic suffixes into the target language, keep the proper name romanized.\n"
         "  城(Cheng)=Kota, 殿(Dian)=Aula, 宫(Gong)=Istana, 河/水(He/Shui)=Sungai, 山(Shan)=Gunung, 门(Men)=Gerbang.\n"
         "  e.g. 长安城→'Kota Chang\\'an', 显德殿→'Aula Xiande', 渭水→'Sungai Wei'.\n"
@@ -389,10 +410,31 @@ def analyze_chapter_with_context(raw_text, context="", existing_reference=None):
         '  "characters": {"OriginalName": "Romanized"},\n'
         '  "locations": {"OriginalName": "Romanized (Meaning)"},\n'
         '  "terms": {"OriginalTerm": "Romanized (Meaning) or equivalent"},\n'
-        '  "modern_terms": {"OriginalTerm": "English loanword to keep"}\n'
+        '  "modern_terms": {"OriginalTerm": "English loanword to keep"},\n'
+        '  "character_profiles": [\n'
+        '    {\n'
+        '      "original_name": "OriginalName",\n'
+        '      "romanized_name": "Romanized",\n'
+        '      "age": 25,\n'
+        '      "gender": "male/female/unknown",\n'
+        '      "relationships": [\n'
+        '        {\n'
+        '          "with": "OtherCharacterRomanized",\n'
+        '          "call_them": "honorific/kinship this character uses for the other",\n'
+        '          "they_call_me": "honorific/kinship the other uses for this character",\n'
+        '          "reason": "age / sect seniority / bet (describe wager) / rank / family"\n'
+        '        }\n'
+        '      ]\n'
+        '    }\n'
+        '  ]\n'
         "}\n\n"
         "Rules:\n"
         "- characters: romanized only (pinyin/romaji), NEVER translate the meaning.\n"
+        "- character_profiles: only characters who appear in this chapter.\n"
+        "  - age: integer if stated/implied, else null.\n"
+        "  - relationships: include ALL honorific/kinship usages found, including those established by bets or contracts.\n"
+        "    For bets: explain the wager and result in 'reason'.\n"
+        "  - If no relationships found, use [].\n"
         "- locations: translate geographic suffixes into the target language, keep the proper name romanized.\n"
         "  城(Cheng)=Kota, 殿(Dian)=Aula, 宫(Gong)=Istana, 河/水(He/Shui)=Sungai, 山(Shan)=Gunung, 门(Men)=Gerbang.\n"
         "  e.g. 长安城→'Kota Chang\\'an', 显德殿→'Aula Xiande', 渭水→'Sungai Wei'.\n"
@@ -537,6 +579,21 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
     if reference.get("modern_terms"):
         mterms = ", ".join(f"{k}→{v}" for k, v in reference["modern_terms"].items())
         ref_lines.append(f"Modern terms (KEEP as English, do NOT translate): {mterms}")
+    # Inject character profiles — age + relationships for correct kinship terms
+    profiles = reference.get("character_profiles", [])
+    if profiles:
+        rel_lines = []
+        for p in profiles:
+            age_str = f", age {p['age']}" if p.get("age") else ""
+            gender_str = f", {p['gender']}" if p.get("gender") and p["gender"] != "unknown" else ""
+            base = f"{p.get('romanized_name', p.get('original_name', '?'))}{age_str}{gender_str}"
+            for r in p.get("relationships", []):
+                rel_lines.append(
+                    f"  {base} → calls {r['with']}: \"{r['call_them']}\" | "
+                    f"{r['with']} calls them: \"{r['they_call_me']}\" ({r.get('reason','')})"
+                )
+        if rel_lines:
+            ref_lines.append("Character relationships & honorifics (use EXACT terms):\n" + "\n".join(rel_lines))
     ref_block  = "\n".join(ref_lines) if ref_lines else "(no reference)"
     guide_block = f"\nTRANSLATION GUIDE (follow strictly):\n{guide_text}\n" if guide_text.strip() else ""
 
@@ -663,6 +720,21 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
     if reference.get("modern_terms"):
         mterms = ", ".join(f"{k}→{v}" for k, v in reference["modern_terms"].items())
         ref_lines.append(f"Modern terms (KEEP as English, do NOT translate): {mterms}")
+    # Inject character profiles — age + relationships for correct kinship terms
+    profiles = reference.get("character_profiles", [])
+    if profiles:
+        rel_lines = []
+        for p in profiles:
+            age_str = f", age {p['age']}" if p.get("age") else ""
+            gender_str = f", {p['gender']}" if p.get("gender") and p["gender"] != "unknown" else ""
+            base = f"{p.get('romanized_name', p.get('original_name', '?'))}{age_str}{gender_str}"
+            for r in p.get("relationships", []):
+                rel_lines.append(
+                    f"  {base} → calls {r['with']}: \"{r['call_them']}\" | "
+                    f"{r['with']} calls them: \"{r['they_call_me']}\" ({r.get('reason','')})"
+                )
+        if rel_lines:
+            ref_lines.append("Character relationships & honorifics (use EXACT terms):\n" + "\n".join(rel_lines))
     ref_block = "\n".join(ref_lines) if ref_lines else "(no reference)"
 
     chunks = _split_by_paragraphs(raw_text, chunk_size)
@@ -817,6 +889,32 @@ def merge_reference(existing, new_data):
         for k, v in new_data.get(key, {}).items():
             if k not in existing[key]:
                 existing[key][k] = v
+
+    # Merge character_profiles — by original_name, append new relationships
+    if "character_profiles" not in existing:
+        existing["character_profiles"] = []
+    existing_profiles = {p["original_name"]: p for p in existing["character_profiles"]}
+    for new_p in new_data.get("character_profiles", []):
+        name = new_p.get("original_name", "")
+        if not name:
+            continue
+        if name not in existing_profiles:
+            existing_profiles[name] = new_p
+        else:
+            ep = existing_profiles[name]
+            # Update age/gender only if currently missing
+            if ep.get("age") is None and new_p.get("age") is not None:
+                ep["age"] = new_p["age"]
+            if not ep.get("gender") or ep["gender"] == "unknown":
+                ep["gender"] = new_p.get("gender", ep.get("gender"))
+            # Append new relationships not already present
+            existing_rels = {(r["with"], r["call_them"]) for r in ep.get("relationships", [])}
+            for rel in new_p.get("relationships", []):
+                key_r = (rel.get("with", ""), rel.get("call_them", ""))
+                if key_r not in existing_rels:
+                    ep.setdefault("relationships", []).append(rel)
+                    existing_rels.add(key_r)
+    existing["character_profiles"] = list(existing_profiles.values())
     return existing
 
 
