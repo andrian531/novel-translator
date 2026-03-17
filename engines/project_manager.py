@@ -271,6 +271,22 @@ def is_chapter_translated(project_id, filename):
     return os.path.exists(path)
 
 
+def list_translated_chapters(project_id):
+    """Return sorted list of translated chapter filenames."""
+    path = os.path.join(_manual_dir(project_id), "chapters", "translated")
+    if not os.path.exists(path):
+        return []
+    return sorted(f for f in os.listdir(path) if f.endswith(".txt"))
+
+
+def load_translated_chapter(project_id, filename):
+    path = os.path.join(_manual_dir(project_id), "chapters", "translated", filename)
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 def load_raw_chapter(project_id, filename):
     path = os.path.join(_manual_dir(project_id), "chapters", "raw", filename)
     if not os.path.exists(path):

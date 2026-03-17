@@ -845,7 +845,25 @@ def manual_research_project(project_id):
     for fname in selected:
         text = pm.load_raw_chapter(project_id, fname)
         if text:
-            content_parts.append(f"[{fname}]\n{text[:MAX_PER_CHAPTER]}")
+            content_parts.append(f"[RAW: {fname}]\n{text[:MAX_PER_CHAPTER]}")
+
+    # Sertakan sample translated chapters untuk konsistensi naming
+    translated_all = pm.list_translated_chapters(project_id)
+    if translated_all:
+        translated_sample = _select_spread(translated_all)
+        MAX_PER_TRANSLATED = 1500
+        trans_parts = []
+        for fname in translated_sample:
+            text = pm.load_translated_chapter(project_id, fname)
+            if text:
+                trans_parts.append(f"[TRANSLATED: {fname}]\n{text[:MAX_PER_TRANSLATED]}")
+        if trans_parts:
+            content_parts.append(
+                "=== TRANSLATED CHAPTERS (for naming consistency reference — preserve ALL names/terms already used here) ===\n"
+                + "\n\n".join(trans_parts)
+                + "\n=== END TRANSLATED ==="
+            )
+            print(f"      + {len(trans_parts)} translated chapter(s) included for consistency.")
 
     combined = "\n\n".join(content_parts)
 
@@ -862,6 +880,9 @@ def manual_research_project(project_id):
     analysis_prompt = (
         f"You are a senior literary analyst and {tgt_lang} translation director.\n"
         f"Novel: {title} | Source: {src_lang} | Target: {tgt_lang}\n\n"
+        f"IMPORTANT: Content marked [TRANSLATED: ...] shows chapters already translated. "
+        f"These are provided ONLY for naming/term consistency — do NOT change any romanization, "
+        f"character name, or term that is already established in those translations.\n\n"
         f"{existing_block}"
         f"=== NOVEL CONTENT ===\n{combined}\n=== END ===\n\n"
         f"Produce THREE clearly marked sections:\n\n"
@@ -902,8 +923,22 @@ def manual_research_project(project_id):
         f'"characters":{{"OriginalName":"Romanized"}},'
         f'"locations":{{"OriginalName":"translated value"}},'
         f'"terms":{{"OriginalTerm":"Romanized (Meaning)"}},'
-        f'"modern_terms":{{"OriginalTerm":"English loanword"}}}}\n'
+        f'"modern_terms":{{"OriginalTerm":"English loanword"}},'
+        f'"character_profiles":['
+        f'{{"original_name":"OriginalName","romanized_name":"Romanized","age":25,"gender":"male/female/unknown",'
+        f'"aliases":[{{"original":"AliasInSourceLang","romanized":"RomanizedAlias","context":"when/why used"}}],'
+        f'"relationships":[{{"with":"OtherRomanized","call_them":"honorific used","they_call_me":"honorific back","reason":"age/sect seniority/bet/rank/family"}}]}}'
+        f']}}\n'
         f"```\n"
+        f"character_profiles rules:\n"
+        f"- Include ALL named characters found in the text.\n"
+        f"- age: integer if stated or clearly implied, else null.\n"
+        f"- aliases: ALL alternative names, nicknames, titles used for this character.\n"
+        f"  context: when/why used (e.g. 'informal', 'imperial title', 'nickname by close friend').\n"
+        f"  If none found, use [].\n"
+        f"- relationships: only if an honorific or kinship term is used between characters.\n"
+        f"  Include relationships established by bets/wagers — note the wager condition in 'reason'.\n"
+        f"  If no relationship found for a character, use empty array [].\n"
         f"content_rating rules:\n"
         f"- 'general'  : no adult content\n"
         f"- 'mature'   : violence or dark themes, but no explicit sexual content\n"
@@ -963,8 +998,9 @@ def manual_research_project(project_id):
             parsed = json.loads(json_match.group(1))
             for k in ("characters", "locations", "terms", "modern_terms"):
                 parsed.setdefault(k, {})
+            parsed.setdefault("character_profiles", [])
             new_entities = {k: v for k, v in parsed.items()
-                            if k in ("characters", "locations", "terms", "modern_terms")}
+                            if k in ("characters", "locations", "terms", "modern_terms", "character_profiles")}
             # Extract and save content_rating from Gemini's assessment
             detected_rating = parsed.get("content_rating", "").lower()
             if detected_rating in ("general", "mature", "explicit"):

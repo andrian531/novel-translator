@@ -6,6 +6,7 @@ A tool for translating web novels (Chinese/Japanese/Korean) with context awarene
 
 - **Multi-engine translation**: Gemini + Ollama, Gemini-only, Ollama-only, or specific local models
 - **Context-aware**: Extracts characters, locations, terms, and modern loanwords via Gemini
+- **Character profiles**: Age, gender, aliases (with annotation on first use per chapter), and relationships (family, sect seniority, bets/wagers) — injected into every translation prompt
 - **Translation guide**: Per-project style guide (tone, naming conventions, key phrases)
 - **Chapter context**: Rolling narrative summary passed between chapters for continuity
 - **Rolling context**: Last sentences of previous chunk passed to next chunk within a chapter
@@ -13,7 +14,8 @@ A tool for translating web novels (Chinese/Japanese/Korean) with context awarene
 - **Explicit content support**: Professional translator role prompt for adult fiction
 - **Website scraper**: Auto-explore and analyze novel websites, generate site configs; SPA sites (Vue/React `#/` routing) auto-detected and rendered via Playwright
 - **Add Raw Chapter**: Input chapter URL → auto-fetch title + content → save to raw/; unknown mirror auto-detected from project metadata
-- **Search novel**: Browse rankings, search, scaffold project structure
+- **Search novel**: Browse rankings, search, scaffold project structure; results filtered by personal settings (exclude tags, display language)
+- **Search settings**: Auto-configured on first use, saved to `config/settings.json` (gitignored)
 - **Manual projects**: Copy raw chapters yourself, translate at your own pace
 
 ## Translation Engines
@@ -38,25 +40,37 @@ novel-translator/
 │   ├── novel_search.py        # Search novels, scaffold projects
 │   ├── site_analyzer.py       # Auto-analyze and add new websites
 │   ├── scraper_manager.py     # Load scrapers from JSON configs
+│   ├── settings_manager.py    # Search preferences (language, exclude tags)
 │   └── scrapers/
 │       └── generic_scraper.py # Universal scraper (reads JSON config)
 ├── config/
 │   ├── site_map.json          # List of active site configs
+│   ├── settings.example.json  # Template for settings.json (gitignored)
 │   └── sites/                 # Per-site JSON configs
 │       ├── 69shuba.json
 │       └── bq730.json
 └── manual_projects/
     └── [ProjectName]/
         ├── metadata.json          # Title, author, source URL, content rating
-        ├── reference.json         # Characters, locations, terms (auto-filled by research)
+        ├── reference.json         # Characters, locations, terms, character_profiles
         ├── translation_guide.json # Style guide (English, auto-generated)
         ├── chapter_context.json   # Rolling chapter summaries (English)
-        ├── temp/                  # Crash recovery & cache (gitignored, portable with project)
+        ├── temp/                  # Crash recovery (gitignored, portable with project)
         │   └── translate_progress.json
         └── chapters/
             ├── raw/               # Source chapters (copy manually or via [A] Add Raw)
             └── translated/        # Output translations
 ```
+
+## reference.json — character_profiles
+
+Each character entry includes:
+- **age** — integer or null
+- **gender** — male/female/unknown
+- **aliases** — alternative names/titles with context; annotated on first use per chapter only
+- **relationships** — who calls whom what, and why (age, sect seniority, bet/wager, rank, family)
+
+Research re-run includes already-translated chapters as consistency reference — existing names and terms are preserved.
 
 ## Getting Started
 

@@ -309,6 +309,7 @@ def analyze_chapter(raw_text):
         '      "romanized_name": "Pinyin",\n'
         '      "age": 25,\n'
         '      "gender": "male/female/unknown",\n'
+        '      "aliases": [{"original": "AliasInSourceLang", "romanized": "RomanizedAlias", "context": "when/why used"}],\n'
         '      "relationships": [\n'
         '        {\n'
         '          "with": "OtherCharacterRomanized",\n'
@@ -324,6 +325,9 @@ def analyze_chapter(raw_text):
         "- characters: pinyin only, NEVER translate the meaning.\n"
         "- character_profiles: only include characters who appear in this chapter.\n"
         "  - age: integer if stated or clearly implied, else null.\n"
+        "  - aliases: ALL alternative names, nicknames, titles used for this character in the text.\n"
+        "    context: brief note on when/why used (e.g. 'informal', 'title when acting as emperor', 'nickname by friends').\n"
+        "    If no aliases found, use [].\n"
         "  - relationships: only include if an honorific/kinship term is used between characters.\n"
         "    Include bets/wagers that establish honorifics (e.g. loser must call winner 'grandpa').\n"
         "  - If no relationships found for a character, use empty array [].\n"
@@ -397,6 +401,22 @@ def analyze_chapter_with_context(raw_text, context="", existing_reference=None):
         if existing_reference.get("modern_terms"):
             ref_summary.append("Known modern terms: " + ", ".join(
                 f"{k}={v}" for k, v in list(existing_reference["modern_terms"].items())[:15]))
+        # Kirim known relationships agar Gemini konsisten dan tidak duplikat
+        profiles = existing_reference.get("character_profiles", [])
+        if profiles:
+            profile_lines = []
+            for p in profiles:
+                rname = p.get('romanized_name', p.get('original_name', '?'))
+                aliases = p.get("aliases", [])
+                alias_str = ", ".join(a["romanized"] for a in aliases) if aliases else "-"
+                profile_lines.append(f"  {rname} | aliases: {alias_str}")
+                for r in p.get("relationships", []):
+                    profile_lines.append(
+                        f"    calls {r['with']}: \"{r['call_them']}\" | "
+                        f"{r['with']} calls them: \"{r['they_call_me']}\" ({r.get('reason','')})"
+                    )
+            if profile_lines:
+                ref_summary.append("Known character profiles (do NOT duplicate, only add NEW aliases/relationships):\n" + "\n".join(profile_lines))
         ctx_block += (
             "EXISTING REFERENCE (use SAME keys/values for entities already known, do NOT duplicate):\n"
             + "\n".join(ref_summary) + "\n\n"
@@ -432,6 +452,9 @@ def analyze_chapter_with_context(raw_text, context="", existing_reference=None):
         "- characters: romanized only (pinyin/romaji), NEVER translate the meaning.\n"
         "- character_profiles: only characters who appear in this chapter.\n"
         "  - age: integer if stated/implied, else null.\n"
+        "  - aliases: ALL alternative names, nicknames, titles used for this character.\n"
+        "    context: when/why used (e.g. 'informal', 'imperial title', 'nickname by close friend').\n"
+        "    If no aliases found, use [].\n"
         "  - relationships: include ALL honorific/kinship usages found, including those established by bets or contracts.\n"
         "    For bets: explain the wager and result in 'reason'.\n"
         "  - If no relationships found, use [].\n"
@@ -579,21 +602,32 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
     if reference.get("modern_terms"):
         mterms = ", ".join(f"{k}→{v}" for k, v in reference["modern_terms"].items())
         ref_lines.append(f"Modern terms (KEEP as English, do NOT translate): {mterms}")
-    # Inject character profiles — age + relationships for correct kinship terms
+    # Inject character profiles — aliases + relationships for correct names and kinship terms
     profiles = reference.get("character_profiles", [])
     if profiles:
-        rel_lines = []
+        profile_lines = []
         for p in profiles:
             age_str = f", age {p['age']}" if p.get("age") else ""
             gender_str = f", {p['gender']}" if p.get("gender") and p["gender"] != "unknown" else ""
-            base = f"{p.get('romanized_name', p.get('original_name', '?'))}{age_str}{gender_str}"
+            rname = p.get('romanized_name', p.get('original_name', '?'))
+            base = f"{rname}{age_str}{gender_str}"
+            aliases = p.get("aliases", [])
+            if aliases:
+                alias_parts = ", ".join(
+                    f"\"{a['romanized']}\" ({a.get('context', '')})" for a in aliases
+                )
+                profile_lines.append(f"  {base} | aliases: {alias_parts}")
             for r in p.get("relationships", []):
-                rel_lines.append(
+                profile_lines.append(
                     f"  {base} → calls {r['with']}: \"{r['call_them']}\" | "
                     f"{r['with']} calls them: \"{r['they_call_me']}\" ({r.get('reason','')})"
                 )
-        if rel_lines:
-            ref_lines.append("Character relationships & honorifics (use EXACT terms):\n" + "\n".join(rel_lines))
+        if profile_lines:
+            ref_lines.append(
+                "Character profiles — aliases & honorifics:\n"
+                + "\n".join(profile_lines)
+                + "\nAlias rule: keep alias as used in source text; add (canonical name) on FIRST occurrence per chapter only."
+            )
     ref_block  = "\n".join(ref_lines) if ref_lines else "(no reference)"
     guide_block = f"\nTRANSLATION GUIDE (follow strictly):\n{guide_text}\n" if guide_text.strip() else ""
 
@@ -720,21 +754,32 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
     if reference.get("modern_terms"):
         mterms = ", ".join(f"{k}→{v}" for k, v in reference["modern_terms"].items())
         ref_lines.append(f"Modern terms (KEEP as English, do NOT translate): {mterms}")
-    # Inject character profiles — age + relationships for correct kinship terms
+    # Inject character profiles — aliases + relationships for correct names and kinship terms
     profiles = reference.get("character_profiles", [])
     if profiles:
-        rel_lines = []
+        profile_lines = []
         for p in profiles:
             age_str = f", age {p['age']}" if p.get("age") else ""
             gender_str = f", {p['gender']}" if p.get("gender") and p["gender"] != "unknown" else ""
-            base = f"{p.get('romanized_name', p.get('original_name', '?'))}{age_str}{gender_str}"
+            rname = p.get('romanized_name', p.get('original_name', '?'))
+            base = f"{rname}{age_str}{gender_str}"
+            aliases = p.get("aliases", [])
+            if aliases:
+                alias_parts = ", ".join(
+                    f"\"{a['romanized']}\" ({a.get('context', '')})" for a in aliases
+                )
+                profile_lines.append(f"  {base} | aliases: {alias_parts}")
             for r in p.get("relationships", []):
-                rel_lines.append(
+                profile_lines.append(
                     f"  {base} → calls {r['with']}: \"{r['call_them']}\" | "
                     f"{r['with']} calls them: \"{r['they_call_me']}\" ({r.get('reason','')})"
                 )
-        if rel_lines:
-            ref_lines.append("Character relationships & honorifics (use EXACT terms):\n" + "\n".join(rel_lines))
+        if profile_lines:
+            ref_lines.append(
+                "Character profiles — aliases & honorifics:\n"
+                + "\n".join(profile_lines)
+                + "\nAlias rule: keep alias as used in source text; add (canonical name) on FIRST occurrence per chapter only."
+            )
     ref_block = "\n".join(ref_lines) if ref_lines else "(no reference)"
 
     chunks = _split_by_paragraphs(raw_text, chunk_size)
@@ -907,6 +952,12 @@ def merge_reference(existing, new_data):
                 ep["age"] = new_p["age"]
             if not ep.get("gender") or ep["gender"] == "unknown":
                 ep["gender"] = new_p.get("gender", ep.get("gender"))
+            # Append new aliases not already present
+            existing_aliases = {a["romanized"].lower() for a in ep.get("aliases", [])}
+            for alias in new_p.get("aliases", []):
+                if alias.get("romanized", "").lower() not in existing_aliases:
+                    ep.setdefault("aliases", []).append(alias)
+                    existing_aliases.add(alias["romanized"].lower())
             # Append new relationships not already present
             existing_rels = {(r["with"], r["call_them"]) for r in ep.get("relationships", [])}
             for rel in new_p.get("relationships", []):
