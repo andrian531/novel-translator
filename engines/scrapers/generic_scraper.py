@@ -238,7 +238,9 @@ class GenericScraper(BaseScraper):
                 )
                 page = context.new_page()
                 try:
-                    response = page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                    # SPA dengan fragment #/ butuh networkidle agar Vue/React selesai render
+                    wait_until = "networkidle" if "#/" in url else "domcontentloaded"
+                    response = page.goto(url, timeout=30000, wait_until=wait_until)
                     status = response.status if response else 0
                     logger.info(f"[{self.site_name}] Playwright {url} — status {status}")
                     if status != 200:
@@ -262,6 +264,9 @@ class GenericScraper(BaseScraper):
     def _fetch_html(self, url, use_playwright=None, wait_selector=None):
         """Fetch HTML menggunakan Playwright atau requests sesuai config."""
         pw = self.needs_playwright if use_playwright is None else use_playwright
+        # URL dengan fragment #/ adalah SPA — harus pakai Playwright agar JS dieksekusi
+        if "#/" in url:
+            pw = True
         if pw:
             return self._fetch_html_playwright(url, wait_selector)
         return self._fetch_html_requests(url)
@@ -492,7 +497,7 @@ class GenericScraper(BaseScraper):
         logger.info(f"[{self.site_name}] Fetching chapter: {chapter_url}")
 
         verify_keyword = self.sel.get("chapter_verify_redirect")
-        html = self._fetch_html(chapter_url, use_playwright=self.chapter_needs_playwright)
+        html = self._fetch_html(chapter_url, use_playwright=self.chapter_needs_playwright if "#/" not in chapter_url else True)
         if not html:
             logger.error(f"[{self.site_name}] Gagal fetch chapter: {chapter_url}")
             return ""
@@ -549,7 +554,8 @@ class GenericScraper(BaseScraper):
         lalu h1, lalu <title> tag halaman.
         """
         logger.info(f"[{self.site_name}] Fetching chapter full: {chapter_url}")
-        html = self._fetch_html(chapter_url, use_playwright=self.chapter_needs_playwright)
+        # Biarkan _fetch_html auto-detect SPA (#/) — jangan override dengan chapter_needs_playwright
+        html = self._fetch_html(chapter_url, use_playwright=self.chapter_needs_playwright if "#/" not in chapter_url else True)
         if not html:
             return {"title": "", "content": ""}
 
@@ -588,6 +594,13 @@ class GenericScraper(BaseScraper):
 
         # Ambil content
         content_tag = self._select_one_first(soup, self.sel.get("chapter_content", []))
+        if not content_tag:
+            # Fallback: cari elemen dengan teks terpanjang (berguna untuk SPA dengan DOM berbeda)
+            candidates = soup.find_all(["div", "article", "section"])
+            if candidates:
+                content_tag = max(candidates, key=lambda t: len(t.get_text()))
+                if len(content_tag.get_text()) < 200:
+                    content_tag = None
         if not content_tag:
             logger.warning(f"[{self.site_name}] Selector konten tidak ditemukan di {chapter_url}")
             return {"title": title, "title_confidence": title_confidence, "content": ""}
