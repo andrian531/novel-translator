@@ -953,14 +953,18 @@ def merge_reference(existing, new_data):
             if not ep.get("gender") or ep["gender"] == "unknown":
                 ep["gender"] = new_p.get("gender", ep.get("gender"))
             # Append new aliases not already present
-            existing_aliases = {a["romanized"].lower() for a in ep.get("aliases", [])}
+            existing_aliases = {a["romanized"].lower() for a in ep.get("aliases", []) if isinstance(a, dict)}
             for alias in new_p.get("aliases", []):
+                if not isinstance(alias, dict):
+                    continue
                 if alias.get("romanized", "").lower() not in existing_aliases:
                     ep.setdefault("aliases", []).append(alias)
                     existing_aliases.add(alias["romanized"].lower())
             # Append new relationships not already present
-            existing_rels = {(r["with"], r["call_them"]) for r in ep.get("relationships", [])}
+            existing_rels = {(r["with"], r["call_them"]) for r in ep.get("relationships", []) if isinstance(r, dict)}
             for rel in new_p.get("relationships", []):
+                if not isinstance(rel, dict):
+                    continue
                 key_r = (rel.get("with", ""), rel.get("call_them", ""))
                 if key_r not in existing_rels:
                     ep.setdefault("relationships", []).append(rel)

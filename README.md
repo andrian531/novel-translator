@@ -49,6 +49,18 @@ novel-translator/
 │   └── sites/                 # Per-site JSON configs
 │       ├── 69shuba.json
 │       └── bq730.json
+├── reader/
+│   ├── backend/
+│   │   ├── main.py            # FastAPI — serves novels from manual_projects/
+│   │   ├── requirements.txt
+│   │   └── run.bat            # Double-click to start backend
+│   └── frontend/              # Vue 3 + Vite + Tailwind
+│       └── src/
+│           ├── views/
+│           │   ├── HomeView.vue    # Novel grid
+│           │   ├── NovelView.vue   # Chapter list
+│           │   └── ChapterView.vue # Chapter reader
+│           └── router/index.js
 └── manual_projects/
     └── [ProjectName]/
         ├── metadata.json          # Title, author, source URL, content rating
@@ -85,6 +97,29 @@ Research re-run includes already-translated chapters as consistency reference �
 2. Enter the homepage URL
 3. Program auto-explores: homepage → listing → novel detail → chapter
 4. Gemini generates a JSON config, saved to `config/sites/`
+
+## Web Reader
+
+Read translated novels in a browser.
+
+**Backend** (FastAPI):
+```bash
+cd reader/backend
+# double-click run.bat  OR:
+pip install -r requirements.txt
+uvicorn main:app --reload
+# → http://localhost:8000
+```
+
+**Frontend** (Vue + Tailwind):
+```bash
+cd reader/frontend
+npm install
+npm run dev
+# → http://localhost:5173
+```
+
+The frontend proxies `/api` to `localhost:8000`. Displays translated novels with `title_translated` (target language title) when available, falling back to the original title.
 
 ## Requirements
 
