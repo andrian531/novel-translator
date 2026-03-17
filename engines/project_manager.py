@@ -179,6 +179,11 @@ def load_manual_metadata(project_id):
     return _read_json(f) if os.path.exists(f) else {}
 
 
+def save_manual_metadata(project_id, data):
+    f = os.path.join(_manual_dir(project_id), "metadata.json")
+    _write_json(f, data)
+
+
 def update_manual_metadata(project_id, data):
     f = os.path.join(_manual_dir(project_id), "metadata.json")
     existing = _read_json(f) if os.path.exists(f) else {}

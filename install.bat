@@ -153,47 +153,50 @@ echo  Reason: !OLLAMA_REASON!
 set "OLL_ST_1= " & set "OLL_ST_2= " & set "OLL_ST_3= "
 set "OLL_ST_4= " & set "OLL_ST_5= " & set "OLL_ST_6= "
 set "OLL_ST_7= " & set "OLL_ST_8= " & set "OLL_ST_9= "
+set "OLL_ST_10= "
 
 for /f "skip=1 tokens=1" %%M in ('ollama list 2^>nul') do (
-    if "%%M"=="qwen2.5:7b"        set "OLL_ST_1=[pulled]"
-    if "%%M"=="qwen2.5:3b"        set "OLL_ST_2=[pulled]"
-    if "%%M"=="gemma2:9b"         set "OLL_ST_3=[pulled]"
-    if "%%M"=="gemma3:9b"         set "OLL_ST_4=[pulled]"
-    if "%%M"=="gemma3:12b"        set "OLL_ST_5=[pulled]"
-    if "%%M"=="dolphin-mistral:7b" set "OLL_ST_6=[pulled]"
-    if "%%M"=="dolphin-llama3:8b"  set "OLL_ST_7=[pulled]"
-    if "%%M"=="aya:8b"             set "OLL_ST_8=[pulled]"
-    if "%%M"=="exaone3.5:7.8b"     set "OLL_ST_9=[pulled]"
+    if "%%M"=="qwen2.5:7b"           set "OLL_ST_1=[pulled]"
+    if "%%M"=="qwen2.5:3b"           set "OLL_ST_2=[pulled]"
+    if "%%M"=="gemma2:9b"            set "OLL_ST_3=[pulled]"
+    if "%%M"=="gemma3:9b"            set "OLL_ST_4=[pulled]"
+    if "%%M"=="gemma3:12b"           set "OLL_ST_5=[pulled]"
+    if "%%M"=="dolphin-mistral:7b"   set "OLL_ST_6=[pulled]"
+    if "%%M"=="dolphin-llama3:8b"    set "OLL_ST_7=[pulled]"
+    if "%%M"=="aya:8b"               set "OLL_ST_8=[pulled]"
+    if "%%M"=="exaone3.5:7.8b"       set "OLL_ST_9=[pulled]"
+    if "%%M"=="translategemma:12b"   set "OLL_ST_10=[pulled]"
 )
 
 :OLLAMA_MODEL_LOOP
 echo.
 echo  Ollama models for translation:
-echo  ---------------------------------------------------------------------------------
-echo   No  Model               Size     Best for          Low-censor  Status
-echo  ---------------------------------------------------------------------------------
-echo   [1] qwen2.5:7b          ~4.7GB   Chinese novels    No          !OLL_ST_1!
-echo   [2] qwen2.5:3b          ~2.0GB   Chinese (lighter) No          !OLL_ST_2!
-echo   [3] gemma2:9b           ~5.4GB   General           No          !OLL_ST_3!
-echo   [4] gemma3:9b           ~5.4GB   General (newer)   No          !OLL_ST_4!
-echo   [5] gemma3:12b          ~8.1GB   General (best)    No          !OLL_ST_5!
-echo   [6] dolphin-mistral:7b  ~4.1GB   Low-censor        Yes         !OLL_ST_6!
-echo   [7] dolphin-llama3:8b   ~4.7GB   Low-censor        Yes         !OLL_ST_7!
-echo   [8] aya:8b              ~4.8GB   Japanese novels   No          !OLL_ST_8!
-echo   [9] exaone3.5:7.8b      ~4.7GB   Korean novels     No          !OLL_ST_9!
-echo  ---------------------------------------------------------------------------------
+echo  ------------------------------------------------------------------------------------
+echo   No  Model                 Size    Best for                 Low-censor  Status
+echo  ------------------------------------------------------------------------------------
+echo   [1] qwen2.5:7b            ~4.7GB  Chinese novels           No          !OLL_ST_1!
+echo   [2] qwen2.5:3b            ~2.0GB  Chinese (lighter)        No          !OLL_ST_2!
+echo   [3] gemma2:9b             ~5.4GB  General                  No          !OLL_ST_3!
+echo   [4] gemma3:9b             ~5.4GB  General (newer)          No          !OLL_ST_4!
+echo   [5] gemma3:12b            ~8.1GB  General (best)           No          !OLL_ST_5!
+echo   [6] dolphin-mistral:7b    ~4.1GB  Low-censor (English)     Yes         !OLL_ST_6!
+echo   [7] dolphin-llama3:8b     ~4.7GB  Low-censor (English)     Yes         !OLL_ST_7!
+echo   [8] aya:8b                ~4.8GB  Japanese novels          No          !OLL_ST_8!
+echo   [9] exaone3.5:7.8b        ~4.7GB  Korean novels            No          !OLL_ST_9!
+echo  [10] translategemma:12b    ~8.1GB  Translation-optimized    No          !OLL_ST_10!
+echo  ------------------------------------------------------------------------------------
 echo   [S] Skip / Done
-echo  ---------------------------------------------------------------------------------
+echo  ------------------------------------------------------------------------------------
 echo.
 echo  Priority used by translator (per source language):
-echo    Chinese  : qwen2.5 ^> gemma ^> dolphin ^> mistral
-echo    Japanese : aya ^> qwen2.5 ^> gemma ^> dolphin
-echo    Korean   : exaone ^> aya ^> qwen2.5 ^> gemma ^> dolphin
-echo    Other    : gemma ^> qwen2.5 ^> dolphin ^> mistral
+echo    Chinese  : qwen3 ^> translategemma ^> gemma3 ^> qwen2.5 ^> gemma2 ^> dolphin
+echo    Japanese : aya ^> qwen3 ^> translategemma ^> gemma3 ^> qwen2.5
+echo    Korean   : exaone ^> aya ^> qwen3 ^> translategemma ^> gemma3
+echo    Other    : translategemma ^> gemma3 ^> qwen3 ^> qwen2.5 ^> gemma2
 echo.
 echo  GPU recommendation: !OLLAMA_RECOMMENDED!  (!OLLAMA_REASON!)
-echo  Tip: Install at least qwen2.5:7b for Chinese novels.
-echo       Add dolphin-mistral if source has mature/explicit content.
+echo  Tip: translategemma:12b is fine-tuned for translation (55 languages).
+echo       Install qwen2.5:7b or higher for best Chinese novel quality.
 echo.
 
 set /p OLLAMA_CHOICE="  Choose model to pull [1-9 / S, default=S]: "
@@ -201,15 +204,16 @@ if "!OLLAMA_CHOICE!"=="" goto STEP5
 if /i "!OLLAMA_CHOICE!"=="S" goto STEP5
 
 set "OLLAMA_MODEL="
-if "!OLLAMA_CHOICE!"=="1" set "OLLAMA_MODEL=qwen2.5:7b"
-if "!OLLAMA_CHOICE!"=="2" set "OLLAMA_MODEL=qwen2.5:3b"
-if "!OLLAMA_CHOICE!"=="3" set "OLLAMA_MODEL=gemma2:9b"
-if "!OLLAMA_CHOICE!"=="4" set "OLLAMA_MODEL=gemma3:9b"
-if "!OLLAMA_CHOICE!"=="5" set "OLLAMA_MODEL=gemma3:12b"
-if "!OLLAMA_CHOICE!"=="6" set "OLLAMA_MODEL=dolphin-mistral:7b"
-if "!OLLAMA_CHOICE!"=="7" set "OLLAMA_MODEL=dolphin-llama3:8b"
-if "!OLLAMA_CHOICE!"=="8" set "OLLAMA_MODEL=aya:8b"
-if "!OLLAMA_CHOICE!"=="9" set "OLLAMA_MODEL=exaone3.5:7.8b"
+if "!OLLAMA_CHOICE!"=="1"  set "OLLAMA_MODEL=qwen2.5:7b"
+if "!OLLAMA_CHOICE!"=="2"  set "OLLAMA_MODEL=qwen2.5:3b"
+if "!OLLAMA_CHOICE!"=="3"  set "OLLAMA_MODEL=gemma2:9b"
+if "!OLLAMA_CHOICE!"=="4"  set "OLLAMA_MODEL=gemma3:9b"
+if "!OLLAMA_CHOICE!"=="5"  set "OLLAMA_MODEL=gemma3:12b"
+if "!OLLAMA_CHOICE!"=="6"  set "OLLAMA_MODEL=dolphin-mistral:7b"
+if "!OLLAMA_CHOICE!"=="7"  set "OLLAMA_MODEL=dolphin-llama3:8b"
+if "!OLLAMA_CHOICE!"=="8"  set "OLLAMA_MODEL=aya:8b"
+if "!OLLAMA_CHOICE!"=="9"  set "OLLAMA_MODEL=exaone3.5:7.8b"
+if "!OLLAMA_CHOICE!"=="10" set "OLLAMA_MODEL=translategemma:12b"
 
 if "!OLLAMA_MODEL!"=="" goto OLLAMA_MODEL_LOOP
 
@@ -226,10 +230,11 @@ if errorlevel 1 (
     if "!OLLAMA_MODEL!"=="gemma2:9b"         set "OLL_ST_3=[pulled]"
     if "!OLLAMA_MODEL!"=="gemma3:9b"         set "OLL_ST_4=[pulled]"
     if "!OLLAMA_MODEL!"=="gemma3:12b"        set "OLL_ST_5=[pulled]"
-    if "!OLLAMA_MODEL!"=="dolphin-mistral:7b" set "OLL_ST_6=[pulled]"
+    if "!OLLAMA_MODEL!"=="dolphin-mistral:7b"  set "OLL_ST_6=[pulled]"
     if "!OLLAMA_MODEL!"=="dolphin-llama3:8b"  set "OLL_ST_7=[pulled]"
     if "!OLLAMA_MODEL!"=="aya:8b"             set "OLL_ST_8=[pulled]"
     if "!OLLAMA_MODEL!"=="exaone3.5:7.8b"     set "OLL_ST_9=[pulled]"
+    if "!OLLAMA_MODEL!"=="translategemma:12b" set "OLL_ST_10=[pulled]"
 )
 goto OLLAMA_MODEL_LOOP
 

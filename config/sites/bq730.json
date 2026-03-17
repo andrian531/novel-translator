@@ -1,0 +1,113 @@
+{
+    "name": "bq730",
+    "display_name": "笔趣阁 (bq730.cc)",
+    "source_language": "chinese",
+    "base_url": "https://www.bq730.cc",
+    "mirrors": [
+        "https://www.bq730.cc"
+    ],
+    "encoding": "utf-8",
+    "needs_playwright": false,
+    "chapter_needs_playwright": false,
+    "locale": "zh-CN",
+    "selectors": {
+        "novel_listing": [
+            "ul.lis li",
+            "div.hot div.item"
+        ],
+        "listing_title": [
+            "span.s2 a",
+            "dt a"
+        ],
+        "listing_synopsis": [
+            "dd"
+        ],
+        "listing_author": [
+            "span.s3",
+            "span.s5",
+            "dt span"
+        ],
+        "listing_href_from": "listing_title",
+        "listing_chapter_count": [
+            "span.s4"
+        ],
+        "listing_last_update": [
+            "span.s6"
+        ],
+        "listing_status": [
+            "span.s5"
+        ],
+        "novel_title": [
+            "h1"
+        ],
+        "novel_author_selectors": [
+            "div.info p",
+            ".book .info p"
+        ],
+        "novel_author_keyword": "作者",
+        "novel_synopsis": [
+            "div.intro",
+            "#intro"
+        ],
+        "novel_status": [
+            "span#full",
+            "div.small span",
+            "div.info p"
+        ],
+        "chapter_list": [
+            "div.listmain dd a",
+            "div#list dd a",
+            "ul.lis li a"
+        ],
+        "chapter_content": [
+            "div#content",
+            "div#chaptercontent"
+        ],
+        "chapter_content_remove": [
+            "script",
+            "style",
+            ".ad",
+            "div.footer",
+            "div.read-pro-inner"
+        ]
+    },
+    "rankings": {
+        "玄幻奇幻": {
+            "url": "/xuanhuan/",
+            "url_paged": "/xuanhuan/{page}.html"
+        },
+        "武侠仙侠": {
+            "url": "/wuxia/",
+            "url_paged": "/wuxia/{page}.html"
+        },
+        "都市言情": {
+            "url": "/dushi/",
+            "url_paged": "/dushi/{page}.html"
+        },
+        "历史军事": {
+            "url": "/lishi/",
+            "url_paged": "/lishi/{page}.html"
+        },
+        "网游竞技": {
+            "url": "/wangyou/",
+            "url_paged": "/wangyou/{page}.html"
+        },
+        "科幻灵异": {
+            "url": "/kehuan/",
+            "url_paged": "/kehuan/{page}.html"
+        },
+        "女生频道": {
+            "url": "/mm/",
+            "url_paged": "/mm/{page}.html"
+        },
+        "全本小说": {
+            "url": "/finish/",
+            "url_paged": "/finish/{page}.html"
+        },
+        "排行榜": {
+            "url": "/top/",
+            "url_paged": "/top/{page}.html"
+        }
+    },
+    "search_url": "https://www.bq730.cc/s?q="
+}

@@ -1,0 +1,78 @@
+{
+    "name": "69shuba",
+    "display_name": "69书吧",
+    "source_language": "chinese",
+    "base_url": "https://www.69shuba.com",
+    "mirrors": [
+        "https://www.69shuba.com",
+        "https://www.69shux.com",
+        "https://www.69shu.me"
+    ],
+    "encoding": "gbk",
+    "needs_playwright": true,
+    "chapter_needs_playwright": true,
+    "locale": "zh-CN",
+    "selectors": {
+        "novel_listing": [
+            "ul li:has(h3.ranktit)",
+            "div.newbox ul li"
+        ],
+        "listing_title": [
+            "h3.ranktit",
+            "a"
+        ],
+        "listing_synopsis": [],
+        "listing_author": [],
+        "listing_href_from": "listing_title",
+        "listing_chapter_count": [],
+        "listing_last_update": [],
+        "listing_status": [
+            ".rank_right span"
+        ],
+        "novel_title": [
+            "h1"
+        ],
+        "novel_author_selectors": [
+            ".mybox"
+        ],
+        "novel_author_keyword": "作者",
+        "novel_synopsis": [
+            ".navtxt"
+        ],
+        "novel_status": [
+            ".mybox"
+        ],
+        "chapter_list": [
+            ".qustime ul li a",
+            ".tabsnav ul li a"
+        ],
+        "chapter_content": [
+            ".txtnav"
+        ],
+        "chapter_content_remove": [
+            "script",
+            "style",
+            ".yuedutuijian",
+            "div.txtnav > h1"
+        ]
+    },
+    "rankings": {
+        "全本小说": {
+            "url": "/novels/full",
+            "url_paged": "/novels/full/{page}.htm"
+        },
+        "热门小说": {
+            "url": "/novels/hot",
+            "url_paged": "/novels/hot/{page}.htm"
+        },
+        "男生小说": {
+            "url": "/novels/male",
+            "url_paged": "/novels/male/{page}.htm"
+        },
+        "女生小说": {
+            "url": "/novels/female",
+            "url_paged": "/novels/female/{page}.htm"
+        }
+    },
+    "search_url": "https://www.69shuba.com/modules/article/search.php?searchkey="
+}

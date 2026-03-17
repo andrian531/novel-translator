@@ -10,19 +10,20 @@ def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def main_menu():
-    # manager = ScraperManager()  # Scraper sementara dinonaktifkan
+    manager = ScraperManager()
 
     while True:
         clear_screen()
         print("========================================")
-        print("      NOVEL TRANSLATOR - CLI v0.2")
+        print("      NOVEL TRANSLATOR - CLI v0.3")
         print("========================================")
         print("  1. New Translate Project")
         print("  2. Manage Projects")
         print("  ────────────────────────────────────")
-        print("  3. Exit")
-        print("")
-        print("  [Coming Soon] Discover Novels & Scraper")
+        print("  3. Search Novel")
+        print("  4. Add Website")
+        print("  ────────────────────────────────────")
+        print("  5. Exit")
         print("----------------------------------------")
 
         choice = input("Select an option: ").strip()
@@ -32,6 +33,12 @@ def main_menu():
         elif choice == '2':
             manual_project_select()
         elif choice == '3':
+            from engines.novel_search import search_novel_menu
+            search_novel_menu(manager)
+        elif choice == '4':
+            from engines.site_analyzer import analyze_website
+            analyze_website(manager)
+        elif choice == '5':
             print("Goodbye!")
             break
         else:
@@ -601,6 +608,24 @@ def manual_project_menu(project_id):
                     batch_translate_chapters(project_id, [chapters[i-1] for i in valid])
 
 
+def _ensure_content_rating(project_id, meta):
+    """
+    If content_rating not set in metadata, prompt user and save.
+    Returns updated meta dict.
+    """
+    if meta.get("content_rating"):
+        return meta
+    print("  Content rating not set for this project.")
+    print("  1. General  — safe for all audiences")
+    print("  2. Mature   — violence/dark themes, no explicit sexual content")
+    print("  3. Explicit — contains explicit sexual content [18+]")
+    rc = input("  Set rating (Enter = general): ").strip()
+    meta["content_rating"] = {"2": "mature", "3": "explicit"}.get(rc, "general")
+    pm.save_manual_metadata(project_id, meta)
+    print(f"  [OK] Content rating set to '{meta['content_rating']}' and saved.\n")
+    return meta
+
+
 def manual_research_project(project_id):
     """
     Riset project 2 tahap:
@@ -734,27 +759,35 @@ def manual_research_project(project_id):
         f"(Dewasa/kekerasan/politik sensitif? Sebutkan atau tulis 'Aman')\n\n"
 
         f"### SECTION 2: TRANSLATION GUIDE ###\n"
-        f"Write in {tgt_lang}. This guide will be injected into every translation prompt.\n"
-        f"## GAYA BAHASA TARGET\n"
-        f"(Formal/informal, santai/serius, gaya light novel/sastra — sesuai tone asli)\n\n"
-        f"## KONVENSI PENAMAAN\n"
-        f"(Cara render nama: pinyin penuh / disingkat / gabung dengan gelar, dll)\n\n"
-        f"## FRASA KUNCI & PADANANNYA\n"
-        f"(Ungkapan khas novel ini + terjemahan yang konsisten dan natural)\n\n"
-        f"## INSTRUKSI KHUSUS UNTUK PENERJEMAH\n"
-        f"(Hal yang HARUS dijaga: konsistensi istilah, idiom, nuansa humor, dll)\n"
-        f"WAJIB SERTAKAN: apakah novel ini menggunakan istilah internet/modern (live stream, host, dll)? "
-        f"Jika ya, tuliskan instruksi: 'Kata serapan Inggris yang sudah umum di Indonesia (host, live stream, "
-        f"streaming, online, boss, level, dll) JANGAN diterjemahkan ke padanan formal yang kaku.'\n\n"
+        f"Write ENTIRELY IN ENGLISH. This guide is injected into every translation prompt and must be understood "
+        f"by all LLMs including small local models — English ensures maximum compliance.\n"
+        f"When referencing target-language ({tgt_lang}) terms or output examples, put them in quotes.\n\n"
+        f"## TARGET STYLE\n"
+        f"(Formal/informal, serious/lighthearted, light novel/literary — match the original tone)\n\n"
+        f"## NAMING CONVENTIONS\n"
+        f"(How to render names: full pinyin / abbreviated / combined with title, etc.)\n\n"
+        f"## KEY PHRASES & EQUIVALENTS\n"
+        f"(Signature expressions of this novel + their consistent, natural {tgt_lang} translations in quotes)\n\n"
+        f"## SPECIAL INSTRUCTIONS FOR TRANSLATOR\n"
+        f"(What MUST be preserved: term consistency, idioms, humor nuance, etc.)\n"
+        f"REQUIRED: Does this novel use internet/modern terms (live stream, host, etc.)? "
+        f"If yes, write: 'English loanwords already common in {tgt_lang} (host, live stream, "
+        f"streaming, online, boss, level, etc.) MUST NOT be translated into stiff formal equivalents.'\n\n"
 
         f"### SECTION 3: REFERENCE JSON ###\n"
         f"Output ONLY valid JSON:\n"
         f"```json\n"
-        f'{{"characters":{{"OriginalName":"Romanized"}},'
+        f'{{"content_rating":"general|mature|explicit",'
+        f'"characters":{{"OriginalName":"Romanized"}},'
         f'"locations":{{"OriginalName":"translated value"}},'
         f'"terms":{{"OriginalTerm":"Romanized (Meaning)"}},'
         f'"modern_terms":{{"OriginalTerm":"English loanword"}}}}\n'
         f"```\n"
+        f"content_rating rules:\n"
+        f"- 'general'  : no adult content\n"
+        f"- 'mature'   : violence or dark themes, but no explicit sexual content\n"
+        f"- 'explicit' : contains explicit sexual content (rape, harem, r18, monster+human sexual acts, etc.)\n"
+        f"Base your rating on the actual content you read above, not just the title.\n\n"
         f"JSON rules:\n"
         f"- characters: romanized (pinyin/romaji) ONLY, never translate the name meaning.\n"
         f"- locations: translate geographic suffixes into {tgt_lang}, keep the proper name romanized.\n"
@@ -809,7 +842,14 @@ def manual_research_project(project_id):
             parsed = json.loads(json_match.group(1))
             for k in ("characters", "locations", "terms", "modern_terms"):
                 parsed.setdefault(k, {})
-            new_entities = parsed
+            new_entities = {k: v for k, v in parsed.items()
+                            if k in ("characters", "locations", "terms", "modern_terms")}
+            # Extract and save content_rating from Gemini's assessment
+            detected_rating = parsed.get("content_rating", "").lower()
+            if detected_rating in ("general", "mature", "explicit"):
+                meta["content_rating"] = detected_rating
+                pm.save_manual_metadata(project_id, meta)
+                print(f"     [✓] Content rating detected by AI: '{detected_rating}'")
         except json.JSONDecodeError:
             pass
 
@@ -974,14 +1014,20 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
     # Select engine — hanya jika belum ditentukan (single mode)
     if engine_mode is None:
         print("Translation engine:")
-        print("  1. Gemini + Ollama fallback  (Gemini analyzes, Ollama translates — token efficient)")
-        print("  2. Ollama only               (local, offline, no rate limits)")
-        print("  3. Gemini only               (Gemini for everything — token heavy, rate limit risk)")
+        print("  1. Gemini + Ollama           (Gemini: guide/analysis only — Ollama: all translation, hemat)")
+        print("  2. Ollama only               (local, offline, no Gemini at all)")
+        print("  3. Gemini primary + Ollama backup  (Gemini tiap chunk, Ollama backup jika Gemini gagal)")
+        print("  4. Gemini + gemma3           (Gemini: guide/analysis only — gemma3: semua terjemahan)")
+        print("  5. Gemini + translategemma   (Gemini: guide/analysis only — translategemma: semua terjemahan)")
         eng_c = input("Choice [1]: ").strip()
         if eng_c == "2":
             engine_mode = "ollama"
         elif eng_c == "3":
             engine_mode = "gemini_only"
+        elif eng_c == "4":
+            engine_mode = "gemini_gemma3"
+        elif eng_c == "5":
+            engine_mode = "gemini_translategemma"
         else:
             engine_mode = "gemini_fallback"
     print()
@@ -1039,11 +1085,22 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
               f"{len(ref.get('modern_terms',{}))} modern terms\n")
 
     # Step 2: Translate per chunk
-    models = tr.get_available_models()
+    _src_lang = meta.get("source_lang", "Chinese")
+    content_rating = meta.get("content_rating", "general")
+
+    is_explicit = content_rating == "explicit"
+    if is_explicit:
+        models = tr.get_available_models_explicit(_src_lang)
+        print(f"  [18+] Explicit content — using professional translator role prompt.")
+    else:
+        models = tr.get_available_models(_src_lang)
+
     chunks_est = max(1, len(raw_text) // 2000)
     engine_label = {"gemini_fallback": "Gemini + Ollama fallback",
                     "gemini_only": "Gemini only",
-                    "ollama": "Ollama local"}.get(engine_mode, engine_mode)
+                    "ollama": "Ollama local",
+                    "gemini_gemma3": "Gemini + gemma3",
+                    "gemini_translategemma": "Gemini + translategemma"}.get(engine_mode, engine_mode)
     print(f"[2/3] Translating... (~{chunks_est} chunks) | Engine: {engine_label}\n")
 
     def _progress(n, total, engine):
@@ -1059,22 +1116,52 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             chunk_size=2000,
             progress_cb=_progress,
             guide_text=guide_text,
+            is_explicit=is_explicit,
         )
     elif engine_mode == "gemini_only":
-        translated, stats = tr.translate_with_gemini_primary(
-            raw_text, ref, target,
-            ollama_models=[],          # kosong = tidak ada fallback
-            chunk_size=2000,
-            progress_cb=_progress,
-            guide_text=guide_text,
-        )
-    else:
+        # Gemini utama, Ollama semua model sebagai backup — tidak ada kalimat yang gagal terjemah
         translated, stats = tr.translate_with_gemini_primary(
             raw_text, ref, target,
             ollama_models=models,
             chunk_size=2000,
             progress_cb=_progress,
             guide_text=guide_text,
+            is_explicit=is_explicit,
+        )
+    elif engine_mode == "gemini_gemma3":
+        # Gemini hanya analisis — gemma3 yang terjemahkan semua chunk
+        gemma3_models = [m for m in models if "gemma3" in m or "gemma:3" in m or m.startswith("gemma3")]
+        translated, stats = tr.translate_with_ollama_only(
+            raw_text, ref, target,
+            ollama_models=gemma3_models,
+            chunk_size=2000,
+            progress_cb=_progress,
+            guide_text=guide_text,
+            source_lang=_src_lang,
+            is_explicit=is_explicit,
+        )
+    elif engine_mode == "gemini_translategemma":
+        # Gemini hanya analisis — translategemma yang terjemahkan semua chunk
+        tgemma_models = [m for m in models if "translategemma" in m]
+        translated, stats = tr.translate_with_ollama_only(
+            raw_text, ref, target,
+            ollama_models=tgemma_models,
+            chunk_size=2000,
+            progress_cb=_progress,
+            guide_text=guide_text,
+            source_lang=_src_lang,
+            is_explicit=is_explicit,
+        )
+    else:
+        # gemini_fallback: Gemini hanya untuk analisis/guide — Ollama menerjemahkan semua chunk
+        translated, stats = tr.translate_with_ollama_only(
+            raw_text, ref, target,
+            ollama_models=models,
+            chunk_size=2000,
+            progress_cb=_progress,
+            guide_text=guide_text,
+            source_lang=_src_lang,
+            is_explicit=is_explicit,
         )
     print()  # newline setelah progress bar
 
@@ -1087,7 +1174,56 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
     g = stats.get("gemini", 0)
     o = stats.get("ollama", 0)
     f = stats.get("failed", 0)
+    c = stats.get("censored", 0)
     print(f"     Gemini: {g} chunks | Ollama: {o} chunks | Failed: {f} chunks")
+
+    # If censored content detected and not yet in explicit mode → offer upgrade + retry
+    if c > 0 and not is_explicit and not batch_mode:
+        print(f"\n  [!] {c} chunk(s) were refused/censored by local models.")
+        print(f"      This chapter may contain explicit content not detected during research.")
+        ans = input("  Upgrade content rating to 'explicit' and re-translate? (y/n): ").strip().lower()
+        if ans == "y":
+            meta["content_rating"] = "explicit"
+            pm.save_manual_metadata(project_id, meta)
+            print("  [OK] Content rating updated to 'explicit'. Re-translating with professional translator prompt...\n")
+            explicit_models = tr.get_available_models_explicit(_src_lang)
+            if engine_mode == "ollama":
+                translated, stats = tr.translate_with_ollama_only(
+                    raw_text, ref, target, ollama_models=explicit_models,
+                    chunk_size=2000, progress_cb=_progress, guide_text=guide_text, is_explicit=True,
+                )
+            elif engine_mode == "gemini_gemma3":
+                _em = [m for m in explicit_models if "gemma3" in m or m.startswith("gemma3")]
+                translated, stats = tr.translate_with_ollama_only(
+                    raw_text, ref, target, ollama_models=_em,
+                    chunk_size=2000, progress_cb=_progress, guide_text=guide_text,
+                    source_lang=_src_lang, is_explicit=True,
+                )
+            elif engine_mode == "gemini_translategemma":
+                _em = [m for m in explicit_models if "translategemma" in m]
+                translated, stats = tr.translate_with_ollama_only(
+                    raw_text, ref, target, ollama_models=_em,
+                    chunk_size=2000, progress_cb=_progress, guide_text=guide_text,
+                    source_lang=_src_lang, is_explicit=True,
+                )
+            elif engine_mode == "gemini_only":
+                translated, stats = tr.translate_with_gemini_primary(
+                    raw_text, ref, target, ollama_models=explicit_models,
+                    chunk_size=2000, progress_cb=_progress, guide_text=guide_text, is_explicit=True,
+                )
+            else:
+                # gemini_fallback: Ollama menerjemahkan, Gemini hanya guide
+                translated, stats = tr.translate_with_ollama_only(
+                    raw_text, ref, target, ollama_models=explicit_models,
+                    chunk_size=2000, progress_cb=_progress, guide_text=guide_text,
+                    source_lang=_src_lang, is_explicit=True,
+                )
+            print()
+            if not translated:
+                print(f"\n[-] Re-translation failed.")
+                if not batch_mode:
+                    input("Press Enter...")
+                return False
 
     # Step 3: Save
     print(f"\n[3/3] Saving...")
@@ -1158,14 +1294,20 @@ def batch_translate_chapters(project_id, chapter_list):
 
     # Pilih engine sekali untuk semua chapter
     print("Translation engine (applies to ALL chapters):")
-    print("  1. Gemini + Ollama fallback  (recommended)")
-    print("  2. Ollama only               (offline, no rate limits)")
-    print("  3. Gemini only               (token heavy)")
+    print("  1. Gemini + Ollama           (Gemini: guide/analysis only — Ollama: all translation, hemat)")
+    print("  2. Ollama only               (local, offline, no Gemini at all)")
+    print("  3. Gemini primary + Ollama backup  (Gemini tiap chunk, Ollama backup jika Gemini gagal)")
+    print("  4. Gemini translate + gemma3 fallback   (Gemini translates, gemma3 if Gemini fails)")
+    print("  5. Gemini translate + translategemma    (Gemini translates, translategemma if Gemini fails)")
     eng_c = input("Choice [1]: ").strip()
     if eng_c == "2":
         engine_mode = "ollama"
     elif eng_c == "3":
         engine_mode = "gemini_only"
+    elif eng_c == "4":
+        engine_mode = "gemini_gemma3"
+    elif eng_c == "5":
+        engine_mode = "gemini_translategemma"
     else:
         engine_mode = "gemini_fallback"
 
@@ -1265,7 +1407,7 @@ def generate_alt_titles(project_id):
 
 
 def generate_image_prompt(project_id):
-    """Gemini generate prompt untuk membuat cover image (Midjourney/DALL-E/Stable Diffusion)."""
+    """Gemini generate prompt untuk membuat cover image (Midjourney/DALL-E/SD/Gemini Image/Grok)."""
     clear_screen()
     meta     = pm.load_manual_metadata(project_id)
     title    = meta.get("title", "")
@@ -1283,15 +1425,60 @@ def generate_image_prompt(project_id):
     print("  1. Midjourney")
     print("  2. DALL-E / ChatGPT Image")
     print("  3. Stable Diffusion")
-    print("  4. General (all platforms)")
+    print("  4. Gemini Image (Imagen 3)")
+    print("  5. Grok Aurora")
+    print("  6. General (all platforms)")
     plat_c = input("Choice [1]: ").strip()
-    platform = {"2": "DALL-E", "3": "Stable Diffusion", "4": "General"}.get(plat_c, "Midjourney")
+    platform = {
+        "2": "DALL-E",
+        "3": "Stable Diffusion",
+        "4": "Gemini Image",
+        "5": "Grok Aurora",
+        "6": "General",
+    }.get(plat_c, "Midjourney")
 
     print(f"\n[*] Requesting Gemini to generate image prompt for {platform}...\n")
 
     chars_detail = "\n".join(f"  {k}: {v}" for k, v in list(ref.get("characters", {}).items())[:5])
     locs_detail  = ", ".join(list(ref.get("locations", {}).values())[:4])
     guide_tone   = guide.get("guide_text", "")[:300]
+
+    # Platform-specific prompt guidance
+    platform_hints = {
+        "Midjourney": (
+            "Format: concise English prompt with style modifiers separated by commas. "
+            "End with technical params like --ar 2:3 --style raw --v 6. "
+            "Use Midjourney-specific keywords (e.g. --niji 6 for anime style)."
+        ),
+        "DALL-E": (
+            "Format: natural descriptive English paragraph (2-4 sentences). "
+            "DALL-E 3 works best with rich scene descriptions rather than tag lists. "
+            "Include art style, lighting, composition, and mood in flowing prose."
+        ),
+        "Stable Diffusion": (
+            "Format: comma-separated English tags. Include: subject, art style, quality tags "
+            "(masterpiece, best quality, 8k), lighting, color palette. "
+            "Also provide a separate NEGATIVE PROMPT list of things to avoid."
+        ),
+        "Gemini Image": (
+            "Format: rich, natural-language English scene description. "
+            "Gemini Imagen 3 excels with detailed narrative prompts — describe the scene as if "
+            "writing a vivid paragraph for a film director. "
+            "Focus on: subject details, environment, lighting, mood, and art style. "
+            "No technical tags or parameters needed — just clear, detailed, vivid description."
+        ),
+        "Grok Aurora": (
+            "Format: detailed English prompt, can be longer than Midjourney. "
+            "Grok Aurora (xAI) handles natural language well but also responds to style keywords. "
+            "Include character details, setting, art style, and mood. "
+            "Mix descriptive sentences with style tags for best results. No special parameters needed."
+        ),
+        "General": (
+            "Provide prompts for ALL major platforms: Midjourney, DALL-E, Stable Diffusion, "
+            "Gemini Image, and Grok Aurora. Label each section clearly with the platform name."
+        ),
+    }
+    hint = platform_hints.get(platform, "")
 
     prompt = (
         f"You are an expert AI image prompt engineer for novel cover art.\n\n"
@@ -1300,18 +1487,19 @@ def generate_image_prompt(project_id):
         f"Main characters:\n{chars_detail or '  (tidak tersedia)'}\n"
         f"Key locations: {locs_detail or '(tidak tersedia)'}\n"
         f"Story tone: {guide_tone or '(tidak tersedia)'}\n\n"
-        f"Generate cover art prompts optimized for {platform}.\n\n"
+        f"Generate cover art prompts optimized for **{platform}**.\n"
+        f"Platform guidance: {hint}\n\n"
         f"Provide:\n"
         f"1. **MAIN PROMPT** — Full detailed prompt (English) for a stunning novel cover:\n"
         f"   - Main character visual description (appearance, clothing, pose)\n"
         f"   - Background/setting atmosphere\n"
         f"   - Art style (anime/manhwa/realistic/painterly — match the novel genre)\n"
         f"   - Lighting, color palette, mood\n"
-        f"   - Quality/technical tags appropriate for {platform}\n\n"
-        f"2. **NEGATIVE PROMPT** (things to avoid, especially for {platform})\n\n"
+        f"   - Technical format appropriate for {platform}\n\n"
+        f"2. **NEGATIVE PROMPT** (things to avoid — skip if platform doesn't use negative prompts)\n\n"
         f"3. **ALTERNATIVE CONCEPT** — A second composition idea (different pose/scene)\n\n"
-        f"4. **STYLE TAGS** — 5-8 concise style keywords for quick use\n\n"
-        f"Write prompts in English (standard for image AI). Explain choices in Indonesian."
+        f"4. **STYLE TAGS** — 5-8 concise style keywords for quick iteration\n\n"
+        f"Write prompts in English (standard for image AI). Explain design choices briefly in Indonesian."
     )
 
     result = tr._run_gemini(prompt, timeout=120)

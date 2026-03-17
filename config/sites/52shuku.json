@@ -1,0 +1,105 @@
+{
+    "name": "52shuku",
+    "display_name": "52书库",
+    "source_language": "chinese",
+    "base_url": "https://www.52shuku.net",
+    "mirrors": [
+        "https://www.52shuku.net"
+    ],
+    "encoding": "utf-8",
+    "needs_playwright": false,
+    "chapter_needs_playwright": false,
+    "locale": "zh-CN",
+    "selectors": {
+        "novel_listing": [
+            "article.excerpt",
+            "div.hot-posts ul li",
+            "div.content ul li"
+        ],
+        "listing_title": [
+            "h2 a",
+            "a"
+        ],
+        "listing_synopsis": [
+            "p.note"
+        ],
+        "listing_author": [
+            "span.muted",
+            "a[href*='/zuozhe/']"
+        ],
+        "listing_href_from": "listing_title",
+        "listing_chapter_count": [],
+        "listing_last_update": [
+            "span.muted"
+        ],
+        "listing_status": [],
+        "novel_title": [
+            "h1.article-title",
+            "h1.article-title#nr_title"
+        ],
+        "novel_author_selectors": [
+            ".article-meta",
+            "h1.article-title",
+            ".article-content p:contains('作者')"
+        ],
+        "novel_author_keyword": "作者",
+        "novel_synopsis": [
+            "div.article-content blockquote",
+            "div.article-content p:first-child"
+        ],
+        "novel_status": [
+            "h1.article-title"
+        ],
+        "chapter_list": [
+            "ul.article-vlist li a",
+            ".article-content a[href*='.html']"
+        ],
+        "chapter_content": [
+            "div.article-content"
+        ],
+        "chapter_content_remove": [
+            "script",
+            "style",
+            ".ads",
+            ".pagination",
+            ".article-social",
+            ".article-tags",
+            ".post-navigation"
+        ]
+    },
+    "rankings": {
+        "言情小说": {
+            "url": "/yanqing/",
+            "url_paged": "/yanqing/index_{page}.html"
+        },
+        "耽美小说": {
+            "url": "/bl/",
+            "url_paged": "/bl/index_{page}.html"
+        },
+        "百合小说": {
+            "url": "/gl/",
+            "url_paged": "/gl/index_{page}.html"
+        },
+        "男频小说": {
+            "url": "/nan/",
+            "url_paged": "/nan/index_{page}.html"
+        },
+        "穿越重生": {
+            "url": "/chongsheng/",
+            "url_paged": "/chongsheng/index_{page}.html"
+        },
+        "科幻架空": {
+            "url": "/KeHuan/",
+            "url_paged": "/KeHuan/index_{page}.html"
+        },
+        "现代都市": {
+            "url": "/xiandaidushi/",
+            "url_paged": "/xiandaidushi/index_{page}.html"
+        },
+        "恐怖灵异": {
+            "url": "/kongbulingyi/",
+            "url_paged": "/kongbulingyi/index_{page}.html"
+        }
+    },
+    "search_url": "https://www.52shuku.net/so/search.php?q="
+}

@@ -1,14 +1,10 @@
 {
-    "sites": {
-        "69shuba": "shuba_69",
-        "bq730": "bq730"
-    },
-    "domains": {
-        "69shuba.com": "shuba_69",
-        "69shuba.cx": "shuba_69",
-        "69shuba.pro": "shuba_69",
-        "69shuba.li": "shuba_69",
-        "69xinshu.com": "shuba_69",
-        "bq730.cc": "bq730"
-    }
+    "sites": {},
+    "domains": {},
+    "site_configs": [
+        "config/sites/69shuba.json",
+        "config/sites/bq730.json",
+        "config/sites/52shuku.json",
+        "config/sites/syosetu.json"
+    ]
 }

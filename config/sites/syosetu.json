@@ -1,0 +1,77 @@
+{
+    "name": "syosetu",
+    "display_name": "Shousetsuka ni Narou",
+    "source_language": "japanese",
+    "base_url": "https://syosetu.com",
+    "mirrors": [
+        "https://syosetu.com",
+        "https://ncode.syosetu.com",
+        "https://yomou.syosetu.com"
+    ],
+    "encoding": "utf-8",
+    "needs_playwright": false,
+    "chapter_needs_playwright": false,
+    "locale": "ja-JP",
+    "selectors": {
+        "novel_listing": [
+            ".c-panel__list-item",
+            ".p-search-result",
+            ".search_ans"
+        ],
+        "listing_title": [
+            ".p-ranking__item-title a",
+            ".p-search-result__title a",
+            "a.tl"
+        ],
+        "listing_synopsis": [
+            ".p-ranking__item-ex",
+            ".p-search-result__ex",
+            ".ex"
+        ],
+        "listing_author": [
+            ".p-ranking__item-author",
+            ".p-search-result__author",
+            ".author"
+        ],
+        "listing_href_from": "listing_title",
+        "novel_title": [
+            ".novel_title"
+        ],
+        "novel_author_selectors": [
+            ".novel_writername"
+        ],
+        "novel_author_keyword": "作者",
+        "novel_synopsis": [
+            "#novel_ex"
+        ],
+        "chapter_list": [
+            ".novel_sublist dd.subtitle a",
+            ".index_box a"
+        ],
+        "chapter_content": [
+            "#novel_p",
+            "#novel_honbun",
+            "#novel_a"
+        ],
+        "chapter_content_remove": [
+            "script",
+            "style",
+            ".ad"
+        ]
+    },
+    "rankings": {
+        "Overall Weekly": {
+            "url": "https://yomou.syosetu.com/ranking/list/type/weekly_total/",
+            "url_paged": "https://yomou.syosetu.com/ranking/list/type/weekly_total/?p={page}"
+        },
+        "Overall Monthly": {
+            "url": "https://yomou.syosetu.com/ranking/list/type/monthly_total/",
+            "url_paged": "https://yomou.syosetu.com/ranking/list/type/monthly_total/?p={page}"
+        },
+        "Isekai Tensei Weekly": {
+            "url": "https://yomou.syosetu.com/ranking/list/type/weekly_isekai/",
+            "url_paged": "https://yomou.syosetu.com/ranking/list/type/weekly_isekai/?p={page}"
+        }
+    },
+    "search_url": "https://yomou.syosetu.com/search.php?word="
+}
