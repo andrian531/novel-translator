@@ -511,7 +511,8 @@ def _split_by_paragraphs(text, max_chars=2000):
 def translate_with_ollama_only(raw_text, reference, target_lang,
                                ollama_models=None, chunk_size=2000,
                                progress_cb=None, guide_text="",
-                               source_lang="Chinese", is_explicit=False):
+                               source_lang="Chinese", is_explicit=False,
+                               job_id=None):
     """
     Engine terjemahan Ollama saja (tanpa Gemini). Cocok saat Gemini rate-limited.
     Fallback terakhir: NLLB jika semua Ollama masih ada CJK tersisa.
@@ -554,7 +555,8 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
     import os, json as _json
     _tmp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "temp")
     os.makedirs(_tmp_dir, exist_ok=True)
-    _tmp_path = os.path.join(_tmp_dir, "translate_progress.json")
+    _safe_id = re.sub(r"[^\w\-]", "_", job_id) if job_id else "default"
+    _tmp_path = os.path.join(_tmp_dir, f"progress_{_safe_id}.json")
     _tmp_data = {"chunks": [], "total": total, "target": target_lang}
 
     for i, chunk in enumerate(chunks, 1):
@@ -636,7 +638,8 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
 def translate_with_gemini_primary(raw_text, reference, target_lang,
                                    ollama_models=None, chunk_size=2000,
                                    progress_cb=None, guide_text="",
-                                   source_lang="Chinese", is_explicit=False):
+                                   source_lang="Chinese", is_explicit=False,
+                                   job_id=None):
     """
     Engine terjemahan utama: Gemini per chunk, fallback Ollama jika disensor/gagal.
     Fallback terakhir: NLLB jika semua engine masih ada CJK tersisa.
@@ -698,7 +701,8 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
     import os as _os, json as _json
     _tmp_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "temp")
     _os.makedirs(_tmp_dir, exist_ok=True)
-    _tmp_path = _os.path.join(_tmp_dir, "translate_progress.json")
+    _safe_id = re.sub(r"[^\w\-]", "_", job_id) if job_id else "default"
+    _tmp_path = _os.path.join(_tmp_dir, f"progress_{_safe_id}.json")
     _tmp_data = {"chunks": [], "total": total, "target": target_lang}
 
     for i, chunk in enumerate(chunks, 1):
