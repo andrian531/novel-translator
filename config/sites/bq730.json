@@ -4,7 +4,8 @@
     "source_language": "chinese",
     "base_url": "https://www.bq730.cc",
     "mirrors": [
-        "https://www.bq730.cc"
+        "https://www.bq730.cc",
+        "https://www.bqg265.top"
     ],
     "encoding": "utf-8",
     "needs_playwright": false,
