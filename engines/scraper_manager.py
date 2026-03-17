@@ -88,3 +88,18 @@ class ScraperManager:
         """Auto-detect situs dari URL dan return scraper."""
         domain = urlparse(url).netloc.replace("www.", "")
         return self.get_scraper_by_domain(domain)
+
+    def get_config_path(self, site_name):
+        """Return path file JSON config untuk site_name, atau None jika tidak ditemukan."""
+        site_map = self._load_site_map()
+        for rel_path in site_map.get("site_configs", []):
+            full_path = os.path.join(self.base_dir, rel_path)
+            if os.path.exists(full_path):
+                try:
+                    with open(full_path, encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    if cfg.get("name") == site_name:
+                        return full_path
+                except Exception:
+                    continue
+        return None

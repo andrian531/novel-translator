@@ -540,3 +540,84 @@ class GenericScraper(BaseScraper):
         text = content_tag.get_text(separator="\n").strip()
         logger.info(f"[{self.site_name}] Chapter fetched: {len(text)} karakter")
         return text
+
+    def fetch_chapter_full(self, chapter_url):
+        """
+        Fetch chapter content + title dari URL.
+        Kembalikan dict {"title": str, "content": str}.
+        Title diambil dari: selector chapter_title (jika ada di config),
+        lalu h1, lalu <title> tag halaman.
+        """
+        logger.info(f"[{self.site_name}] Fetching chapter full: {chapter_url}")
+        html = self._fetch_html(chapter_url, use_playwright=self.chapter_needs_playwright)
+        if not html:
+            return {"title": "", "content": ""}
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Ambil title — catat confidence level
+        # "high"  : dari configured selector atau h1
+        # "low"   : dari <title> tag halaman (sering berisi nama situs)
+        title = ""
+        title_confidence = "low"
+        title_selectors = self.sel.get("chapter_title", [])
+        if isinstance(title_selectors, str):
+            title_selectors = [title_selectors]
+        for sel in title_selectors:
+            tag = soup.select_one(sel)
+            if tag:
+                title = tag.get_text(strip=True)
+                title_confidence = "high"
+                break
+        if not title:
+            h1 = soup.find("h1")
+            if h1:
+                title = h1.get_text(strip=True)
+                title_confidence = "high"
+        if not title:
+            pg_title = soup.find("title")
+            if pg_title:
+                raw_title = pg_title.get_text(strip=True)
+                for sep in [" - ", " | ", " – ", "_", "—"]:
+                    if sep in raw_title:
+                        title = raw_title.split(sep)[0].strip()
+                        break
+                else:
+                    title = raw_title
+                title_confidence = "low"
+
+        # Ambil content
+        content_tag = self._select_one_first(soup, self.sel.get("chapter_content", []))
+        if not content_tag:
+            logger.warning(f"[{self.site_name}] Selector konten tidak ditemukan di {chapter_url}")
+            return {"title": title, "title_confidence": title_confidence, "content": ""}
+
+        for remove_sel in self.sel.get("chapter_content_remove", ["script", "style"]):
+            for tag in content_tag.select(remove_sel):
+                tag.decompose()
+
+        content = content_tag.get_text(separator="\n").strip()
+
+        # Confidence konten: rendah jika terlalu pendek atau baris pertama terlihat seperti watermark/iklan
+        _WATERMARK_KW = re.compile(
+            r"请收藏|收藏本站|手机版|www\.|http|全文阅读|章节目录|下一章|上一章", re.I
+        )
+        paragraphs = [p.strip() for p in content.splitlines() if p.strip()]
+        first_para = paragraphs[0] if paragraphs else ""
+        content_confidence = "high"
+        if len(content) < 300:
+            content_confidence = "low"
+        elif first_para and _WATERMARK_KW.search(first_para):
+            content_confidence = "low"
+
+        logger.info(
+            f"[{self.site_name}] Chapter full: title='{title[:50]}' "
+            f"title_conf={title_confidence} content={len(content)}ch content_conf={content_confidence}"
+        )
+        return {
+            "title": title,
+            "title_confidence": title_confidence,
+            "content": content,
+            "content_confidence": content_confidence,
+            "first_para": first_para,
+        }

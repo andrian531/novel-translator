@@ -560,7 +560,7 @@ def manual_project_menu(project_id):
         total_ch = meta.get("total_chapters", 0)
         total_mark = f" ({total_ch} ch)" if total_ch else ""
         print(f"[R] Refresh  [V] Reference  [S] Research {guide_mark}  [T] Translate Meta {trans_mark}")
-        print(f"[U] Update Chapter Count{total_mark}  [G] Alt Titles  [I] Image Prompt  [B] Back")
+        print(f"[U] Update Chapter Count{total_mark}  [G] Alt Titles  [I] Image Prompt  [A] Add Raw  [B] Back")
         if chapters:
             print(f"[1-{len(chapters)}] Translate chapter")
         print("-" * 56)
@@ -593,6 +593,8 @@ def manual_project_menu(project_id):
             else:
                 print("[-] Invalid input.")
             input("Press Enter...")
+        elif cmd == 'a':
+            add_raw_chapter_from_url(project_id)
         elif cmd == 'g':
             generate_alt_titles(project_id)
         elif cmd == 'i':
@@ -606,6 +608,109 @@ def manual_project_menu(project_id):
                     manual_translate_chapter(project_id, chapters[valid[0]-1])
                 elif len(valid) > 1:
                     batch_translate_chapters(project_id, [chapters[i-1] for i in valid])
+
+
+def add_raw_chapter_from_url(project_id):
+    """
+    Fetch chapter content (+ title) dari URL lalu simpan ke raw folder.
+    - Konfirmasi title/paragraf hanya jika confidence rendah.
+    - Auto-tambah domain baru sebagai mirror di site JSON jika belum terdaftar.
+    """
+    import os, json as _json
+    from urllib.parse import urlparse
+    from engines.scraper_manager import ScraperManager
+
+    print("\n[Add Raw Chapter from URL]")
+    url = input("Chapter URL: ").strip()
+    if not url:
+        return
+
+    sm = ScraperManager()
+    scraper = sm.get_scraper(url)
+    if not scraper:
+        print(f"\n  [-] No site config found for this domain.")
+        print(f"  Use menu 'Add Website' to add this site first.")
+        input("Press Enter...")
+        return
+
+    display = scraper.config.get("display_name", scraper.site_name)
+    print(f"  [*] Site  : {display}")
+    print(f"  [*] Fetching chapter...")
+
+    result = scraper.fetch_chapter_full(url)
+    content = result.get("content", "")
+    title   = result.get("title", "")
+    title_conf   = result.get("title_confidence", "low")
+    content_conf = result.get("content_confidence", "low")
+    first_para   = result.get("first_para", "")
+
+    if not content:
+        print("  [-] Failed to fetch chapter content. Check the URL or site config.")
+        input("Press Enter...")
+        return
+
+    # --- Konfirmasi title (hanya jika confidence rendah) ---
+    if title_conf == "low":
+        print(f"\n  Title detected (low confidence): {title or '(none)'}")
+        ans = input("  Is this correct? [Y/n/type new title]: ").strip()
+        if ans.lower() == "n":
+            title = input("  Enter correct title: ").strip()
+        elif ans and ans.lower() != "y":
+            title = ans  # user langsung ketik judul baru
+
+    # --- Konfirmasi paragraf pertama (hanya jika confidence rendah) ---
+    if content_conf == "low":
+        preview = first_para[:120] + ("..." if len(first_para) > 120 else "")
+        print(f"\n  First paragraph (low confidence):")
+        print(f"  \"{preview}\"")
+        ans = input("  Does this look like chapter content? [Y/n]: ").strip().lower()
+        if ans == "n":
+            print("  [-] Content may be incorrect. Saving anyway — please verify manually.")
+
+    # --- Auto-mirror: cek apakah domain URL sudah terdaftar ---
+    url_domain = urlparse(url).netloc.replace("www.", "")
+    cfg = scraper.config
+    existing_mirrors = cfg.get("mirrors", [cfg.get("base_url", "")])
+    known_domains = {urlparse(m).netloc.replace("www.", "") for m in existing_mirrors}
+
+    if url_domain not in known_domains:
+        scheme = urlparse(url).scheme
+        new_mirror = f"{scheme}://{urlparse(url).netloc}"
+        print(f"\n  [~] Domain '{urlparse(url).netloc}' not in mirrors for {display}.")
+        ans = input(f"  Add '{new_mirror}' as mirror? [Y/n]: ").strip().lower()
+        if ans != "n":
+            cfg["mirrors"] = existing_mirrors + [new_mirror]
+            # Cari path file config dan update
+            config_path = sm.get_config_path(scraper.site_name)
+            if config_path and os.path.exists(config_path):
+                with open(config_path, "w", encoding="utf-8") as _f:
+                    _json.dump(cfg, _f, ensure_ascii=False, indent=4)
+                print(f"  [OK] Mirror added to {os.path.basename(config_path)}")
+            else:
+                print(f"  [-] Could not find config file to update.")
+
+    # --- Nama file ---
+    existing = pm.list_raw_chapters(project_id)
+    next_num = len(existing) + 1
+    suggested = f"chapter_{next_num:03d}.txt"
+    fname_in = input(f"\n  Save as [{suggested}]: ").strip()
+    fname = fname_in if fname_in else suggested
+    if not fname.endswith(".txt"):
+        fname += ".txt"
+
+    # Gabungkan title + content
+    full_content = f"{title}\n\n{content}" if title else content
+
+    # Simpan
+    raw_path = pm.get_raw_chapters_path(project_id)
+    out_path = os.path.join(raw_path, fname)
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(full_content)
+
+    print(f"\n  [OK] Saved: {fname} ({len(full_content)} chars)")
+    if title:
+        print(f"  Title: {title}")
+    input("Press Enter...")
 
 
 def _ensure_content_rating(project_id, meta):
