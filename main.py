@@ -1116,7 +1116,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
     print(f"--- Translate: {filename} ---\n")
 
     raw_text = pm.load_raw_chapter(project_id, filename)
-    _job_id = f"{project_id}__{os.path.splitext(filename)[0]}"
+    _temp_dir = os.path.join(pm.MANUAL_DIR, project_id, "temp")
     if not raw_text:
         print(f"[-] {filename}: File not found or empty — skipped.")
         if not batch_mode:
@@ -1232,7 +1232,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             progress_cb=_progress,
             guide_text=guide_text,
             is_explicit=is_explicit,
-            job_id=_job_id,
+            temp_dir=_temp_dir,
         )
     elif engine_mode == "gemini_only":
         # Gemini utama, Ollama semua model sebagai backup — tidak ada kalimat yang gagal terjemah
@@ -1243,7 +1243,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             progress_cb=_progress,
             guide_text=guide_text,
             is_explicit=is_explicit,
-            job_id=_job_id,
+            temp_dir=_temp_dir,
         )
     elif engine_mode == "gemini_gemma3":
         # Gemini hanya analisis — gemma3 yang terjemahkan semua chunk
@@ -1256,7 +1256,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             guide_text=guide_text,
             source_lang=_src_lang,
             is_explicit=is_explicit,
-            job_id=_job_id,
+            temp_dir=_temp_dir,
         )
     elif engine_mode == "gemini_translategemma":
         # Gemini hanya analisis — translategemma yang terjemahkan semua chunk
@@ -1269,7 +1269,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             guide_text=guide_text,
             source_lang=_src_lang,
             is_explicit=is_explicit,
-            job_id=_job_id,
+            temp_dir=_temp_dir,
         )
     else:
         # gemini_fallback: Gemini hanya untuk analisis/guide — Ollama menerjemahkan semua chunk
@@ -1281,7 +1281,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             guide_text=guide_text,
             source_lang=_src_lang,
             is_explicit=is_explicit,
-            job_id=_job_id,
+            temp_dir=_temp_dir,
         )
     print()  # newline setelah progress bar
 
@@ -1310,33 +1310,33 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             if engine_mode == "ollama":
                 translated, stats = tr.translate_with_ollama_only(
                     raw_text, ref, target, ollama_models=explicit_models,
-                    chunk_size=2000, progress_cb=_progress, guide_text=guide_text, is_explicit=True, job_id=_job_id,
+                    chunk_size=2000, progress_cb=_progress, guide_text=guide_text, is_explicit=True, temp_dir=_temp_dir,
                 )
             elif engine_mode == "gemini_gemma3":
                 _em = [m for m in explicit_models if "gemma3" in m or m.startswith("gemma3")]
                 translated, stats = tr.translate_with_ollama_only(
                     raw_text, ref, target, ollama_models=_em,
                     chunk_size=2000, progress_cb=_progress, guide_text=guide_text,
-                    source_lang=_src_lang, is_explicit=True, job_id=_job_id,
+                    source_lang=_src_lang, is_explicit=True, temp_dir=_temp_dir,
                 )
             elif engine_mode == "gemini_translategemma":
                 _em = [m for m in explicit_models if "translategemma" in m]
                 translated, stats = tr.translate_with_ollama_only(
                     raw_text, ref, target, ollama_models=_em,
                     chunk_size=2000, progress_cb=_progress, guide_text=guide_text,
-                    source_lang=_src_lang, is_explicit=True, job_id=_job_id,
+                    source_lang=_src_lang, is_explicit=True, temp_dir=_temp_dir,
                 )
             elif engine_mode == "gemini_only":
                 translated, stats = tr.translate_with_gemini_primary(
                     raw_text, ref, target, ollama_models=explicit_models,
-                    chunk_size=2000, progress_cb=_progress, guide_text=guide_text, is_explicit=True, job_id=_job_id,
+                    chunk_size=2000, progress_cb=_progress, guide_text=guide_text, is_explicit=True, temp_dir=_temp_dir,
                 )
             else:
                 # gemini_fallback: Ollama menerjemahkan, Gemini hanya guide
                 translated, stats = tr.translate_with_ollama_only(
                     raw_text, ref, target, ollama_models=explicit_models,
                     chunk_size=2000, progress_cb=_progress, guide_text=guide_text,
-                    source_lang=_src_lang, is_explicit=True, job_id=_job_id,
+                    source_lang=_src_lang, is_explicit=True, temp_dir=_temp_dir,
                 )
             print()
             if not translated:

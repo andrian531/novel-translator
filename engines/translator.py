@@ -512,7 +512,7 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
                                ollama_models=None, chunk_size=2000,
                                progress_cb=None, guide_text="",
                                source_lang="Chinese", is_explicit=False,
-                               job_id=None):
+                               temp_dir=None):
     """
     Engine terjemahan Ollama saja (tanpa Gemini). Cocok saat Gemini rate-limited.
     Fallback terakhir: NLLB jika semua Ollama masih ada CJK tersisa.
@@ -551,12 +551,11 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
     role_prefix = _EXPLICIT_ROLE if is_explicit else ""
     prev_context = ""  # rolling context: last 3 sentences of previous chunk
 
-    # Temp file to save progress in case of crash (di root project agar portable)
+    # Temp file to save progress in case of crash (di folder project agar portable)
     import os, json as _json
-    _tmp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "temp")
+    _tmp_dir = temp_dir or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "temp")
     os.makedirs(_tmp_dir, exist_ok=True)
-    _safe_id = re.sub(r"[^\w\-]", "_", job_id) if job_id else "default"
-    _tmp_path = os.path.join(_tmp_dir, f"progress_{_safe_id}.json")
+    _tmp_path = os.path.join(_tmp_dir, "translate_progress.json")
     _tmp_data = {"chunks": [], "total": total, "target": target_lang}
 
     for i, chunk in enumerate(chunks, 1):
@@ -639,7 +638,7 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
                                    ollama_models=None, chunk_size=2000,
                                    progress_cb=None, guide_text="",
                                    source_lang="Chinese", is_explicit=False,
-                                   job_id=None):
+                                   temp_dir=None):
     """
     Engine terjemahan utama: Gemini per chunk, fallback Ollama jika disensor/gagal.
     Fallback terakhir: NLLB jika semua engine masih ada CJK tersisa.
@@ -697,12 +696,11 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
     role_prefix = _EXPLICIT_ROLE if is_explicit else ""
     prev_context = ""  # rolling context: last 3 sentences of previous chunk
 
-    # Temp file to save progress in case of crash (di root project agar portable)
+    # Temp file to save progress in case of crash (di folder project agar portable)
     import os as _os, json as _json
-    _tmp_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "temp")
+    _tmp_dir = temp_dir or _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "temp")
     _os.makedirs(_tmp_dir, exist_ok=True)
-    _safe_id = re.sub(r"[^\w\-]", "_", job_id) if job_id else "default"
-    _tmp_path = _os.path.join(_tmp_dir, f"progress_{_safe_id}.json")
+    _tmp_path = _os.path.join(_tmp_dir, "translate_progress.json")
     _tmp_data = {"chunks": [], "total": total, "target": target_lang}
 
     for i, chunk in enumerate(chunks, 1):
