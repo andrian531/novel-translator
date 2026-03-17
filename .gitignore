@@ -28,6 +28,9 @@ ENV/
 *.log
 scraper_debug.log
 
+# User settings (personal preferences, auto-created on first use)
+config/settings.json
+
 # Project specific
 projects/
 manual_projects/
