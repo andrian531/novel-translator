@@ -9,9 +9,10 @@ A tool for translating web novels (Chinese/Japanese/Korean) with context awarene
 - **Translation guide**: Per-project style guide (tone, naming conventions, key phrases)
 - **Chapter context**: Rolling narrative summary passed between chapters for continuity
 - **Rolling context**: Last sentences of previous chunk passed to next chunk within a chapter
-- **Crash recovery**: Progress saved to temp file mid-translation
+- **Crash recovery**: Progress saved to `temp/` inside each project folder — portable across machines
 - **Explicit content support**: Professional translator role prompt for adult fiction
-- **Website scraper**: Auto-explore and analyze novel websites, generate site configs
+- **Website scraper**: Auto-explore and analyze novel websites, generate site configs; SPA sites (Vue/React `#/` routing) auto-detected and rendered via Playwright
+- **Add Raw Chapter**: Input chapter URL → auto-fetch title + content → save to raw/; unknown mirror auto-detected from project metadata
 - **Search novel**: Browse rankings, search, scaffold project structure
 - **Manual projects**: Copy raw chapters yourself, translate at your own pace
 
@@ -50,8 +51,10 @@ novel-translator/
         ├── reference.json         # Characters, locations, terms (auto-filled by research)
         ├── translation_guide.json # Style guide (English, auto-generated)
         ├── chapter_context.json   # Rolling chapter summaries (English)
+        ├── temp/                  # Crash recovery & cache (gitignored, portable with project)
+        │   └── translate_progress.json
         └── chapters/
-            ├── raw/               # Source chapters (copy manually or via scraper)
+            ├── raw/               # Source chapters (copy manually or via [A] Add Raw)
             └── translated/        # Output translations
 ```
 
