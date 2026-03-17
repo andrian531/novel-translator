@@ -23,7 +23,9 @@ def main_menu():
         print("  3. Search Novel")
         print("  4. Add Website")
         print("  ────────────────────────────────────")
-        print("  5. Exit")
+        print("  5. Settings")
+        print("  ────────────────────────────────────")
+        print("  6. Exit")
         print("----------------------------------------")
 
         choice = input("Select an option: ").strip()
@@ -39,6 +41,11 @@ def main_menu():
             from engines.site_analyzer import analyze_website
             analyze_website(manager)
         elif choice == '5':
+            from engines import settings_manager as sm
+            settings = sm.load()
+            sm.setup_interactive(settings)
+            input("\n  Press Enter to continue...")
+        elif choice == '6':
             print("Goodbye!")
             break
         else:

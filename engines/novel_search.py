@@ -147,7 +147,7 @@ def _collect_novels_from_site(scraper, site_name, max_pages=2):
     return list(all_novels.values())
 
 
-def _filter_and_translate_with_gemini(novels, user_prompt, target_lang):
+def _filter_and_translate_with_gemini(novels, user_prompt, target_lang, exclude_tags=None, exclude_keywords=None):
     """
     Send novel list to Gemini with user criteria.
     Gemini filters + translates title & synopsis.
@@ -193,7 +193,16 @@ def _filter_and_translate_with_gemini(novels, user_prompt, target_lang):
         f"  'mature'   — violence, dark themes, but no explicit sexual content\n"
         f"  'explicit' — contains explicit sexual content (harem, adult, r18, NTR, monster girl, goblin+female, etc.)\n"
         f"  When in doubt from synopsis alone, use 'mature'. Only use 'explicit' if synopsis clearly implies adult content.\n\n"
-        f"Rules:\n"
+        + (
+            f"EXCLUDE any novel that belongs to these genres/tags: {', '.join(exclude_tags)}. "
+            f"Do NOT include them even if they match other criteria.\n"
+            if exclude_tags else ""
+        )
+        + (
+            f"EXCLUDE any novel whose title or synopsis contains these keywords: {', '.join(exclude_keywords)}.\n"
+            if exclude_keywords else ""
+        )
+        + f"Rules:\n"
         f"- Character names: keep in Pinyin (e.g. 夏青 -> Xia Qing)\n"
         f"- Genre tags in brackets: translate naturally\n"
         f"- Return ONLY a valid JSON array — no markdown, no explanation\n\n"
@@ -643,6 +652,8 @@ def search_novel_menu(manager):
     Interactive Search Novel menu with paginated results (10 per page).
     manager: ScraperManager instance
     """
+    from engines import settings_manager as sm
+
     sites = manager.list_available_sites()
 
     print("\n" + "=" * 60)
@@ -658,13 +669,34 @@ def search_novel_menu(manager):
     print(f"  Configured sites: {', '.join(sites)}")
     print()
 
-    target_lang = _pick_language()
+    # Load settings — setup jika belum dikonfigurasi
+    settings = sm.load()
+    if not sm.is_configured(settings):
+        print("  [First time setup] Configure search preferences:\n")
+        settings = sm.setup_interactive(settings)
+        print()
+
+    target_lang = settings["display_language"]
+    exclude_tags = settings["search"].get("exclude_tags", [])
+    exclude_keywords = settings["search"].get("exclude_keywords", [])
+
+    if exclude_tags or exclude_keywords:
+        excl_display = ", ".join(exclude_tags + exclude_keywords)
+        print(f"  Excluding: {excl_display}  ([X] to change settings)")
 
     user_prompt = input("  Search criteria (e.g. 'best completed urban fantasy Chinese'): ").strip()
     if not user_prompt:
         print("  [!] Empty search criteria. Cancelled.")
         input("\n  Press Enter to return...")
         return
+    if user_prompt.upper() == "X":
+        settings = sm.setup_interactive(settings)
+        target_lang = settings["display_language"]
+        exclude_tags = settings["search"].get("exclude_tags", [])
+        exclude_keywords = settings["search"].get("exclude_keywords", [])
+        user_prompt = input("  Search criteria: ").strip()
+        if not user_prompt:
+            return
 
     print()
 
@@ -690,7 +722,9 @@ def search_novel_menu(manager):
 
     print(f"\n  Total {len(all_novels)} novels from all sites. Filtering with AI...")
 
-    results = _filter_and_translate_with_gemini(all_novels, user_prompt, target_lang)
+    results = _filter_and_translate_with_gemini(all_novels, user_prompt, target_lang,
+                                                exclude_tags=exclude_tags,
+                                                exclude_keywords=exclude_keywords)
 
     if not results:
         print("  [!] No novels matched the search criteria.")
