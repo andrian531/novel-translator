@@ -628,41 +628,45 @@ def add_raw_chapter_from_url(project_id):
     sm = ScraperManager()
     scraper = sm.get_scraper(url)
 
-    # Domain tidak dikenali → tawari tambah sebagai mirror dari site yang sudah ada
+    # Domain tidak dikenali → cari site dari source_url metadata proyek
     if not scraper:
         url_netloc = urlparse(url).netloc
-        url_domain = url_netloc.replace("www.", "")
-        print(f"\n  [~] Domain '{url_netloc}' not found in any site config.")
-        sites = sm.get_site_names()
-        if not sites:
-            print("  No site configs available. Use 'Add Website' menu first.")
+        new_mirror = f"{urlparse(url).scheme}://{url_netloc}"
+
+        meta = pm.load_manual_metadata(project_id)
+        source_url = meta.get("source_url", "")
+        site_name  = meta.get("site", "")
+
+        # Cari scraper berdasarkan site name di metadata, atau domain source_url
+        target_cfg = None
+        if site_name and site_name in sm._site_configs:
+            target_cfg = sm._site_configs[site_name]
+        elif source_url:
+            src_domain = urlparse(source_url).netloc.replace("www.", "")
+            ref = sm.get_scraper_by_domain(src_domain)
+            if ref:
+                target_cfg = ref.config
+
+        if not target_cfg:
+            print(f"\n  [-] Cannot determine site for this URL.")
+            print(f"  Set 'source_url' in metadata or use 'Add Website' menu.")
             input("Press Enter...")
             return
-        print("  Is this a mirror of an existing site?")
-        for i, name in enumerate(sites, 1):
-            cfg = sm._site_configs.get(name, {})
-            print(f"  {i}. {cfg.get('display_name', name)}")
-        print(f"  {len(sites)+1}. Cancel")
-        pick = input("  Choice: ").strip()
-        if not pick.isdigit() or int(pick) > len(sites):
-            return
-        chosen_name = sites[int(pick) - 1]
-        cfg = sm._site_configs[chosen_name]
-        scheme = urlparse(url).scheme
-        new_mirror = f"{scheme}://{url_netloc}"
-        cfg["mirrors"] = cfg.get("mirrors", [cfg.get("base_url", "")]) + [new_mirror]
-        config_path = sm.get_config_path(chosen_name)
+
+        # Tambah mirror otomatis
+        target_cfg["mirrors"] = target_cfg.get("mirrors", [target_cfg.get("base_url", "")]) + [new_mirror]
+        config_path = sm.get_config_path(target_cfg["name"])
         if config_path and os.path.exists(config_path):
             with open(config_path, "w", encoding="utf-8") as _f:
-                _json.dump(cfg, _f, ensure_ascii=False, indent=4)
-            print(f"  [OK] '{new_mirror}' added as mirror to {os.path.basename(config_path)}")
+                _json.dump(target_cfg, _f, ensure_ascii=False, indent=4)
+            print(f"  [~] '{url_netloc}' auto-added as mirror to {os.path.basename(config_path)}")
         else:
-            print("  [-] Could not find config file to update.")
+            print("  [-] Could not update config file.")
             input("Press Enter...")
             return
-        # Reload scraper dengan config yang sudah diupdate
+
         from engines.scrapers.generic_scraper import GenericScraper
-        scraper = GenericScraper(cfg)
+        scraper = GenericScraper(target_cfg)
 
     display = scraper.config.get("display_name", scraper.site_name)
     print(f"  [*] Site  : {display}")
