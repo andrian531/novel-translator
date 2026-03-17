@@ -39,6 +39,9 @@ temp/
 # Logs
 scraper_logs/
 
+# Claude
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
