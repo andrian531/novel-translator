@@ -1417,8 +1417,8 @@ def batch_translate_chapters(project_id, chapter_list):
     print("  1. Gemini + Ollama           (Gemini: guide/analysis only — Ollama: all translation, hemat)")
     print("  2. Ollama only               (local, offline, no Gemini at all)")
     print("  3. Gemini primary + Ollama backup  (Gemini tiap chunk, Ollama backup jika Gemini gagal)")
-    print("  4. Gemini translate + gemma3 fallback   (Gemini translates, gemma3 if Gemini fails)")
-    print("  5. Gemini translate + translategemma    (Gemini translates, translategemma if Gemini fails)")
+    print("  4. Gemini + gemma3           (Gemini: guide/analysis only — gemma3: semua terjemahan)")
+    print("  5. Gemini + translategemma   (Gemini: guide/analysis only — translategemma: semua terjemahan)")
     eng_c = input("Choice [1]: ").strip()
     if eng_c == "2":
         engine_mode = "ollama"
