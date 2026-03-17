@@ -34,6 +34,7 @@ manual_projects/
 manual_translations/
 temp_translate_in.txt
 temp_single_translate.txt
+temp/
 
 # Logs
 scraper_logs/
