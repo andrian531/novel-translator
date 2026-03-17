@@ -702,14 +702,10 @@ def add_raw_chapter_from_url(project_id):
         if ans == "n":
             print("  [-] Content may be incorrect. Saving anyway — please verify manually.")
 
-    # --- Nama file ---
+    # --- Nama file --- auto next sequential number
     existing = pm.list_raw_chapters(project_id)
     next_num = len(existing) + 1
-    suggested = f"chapter_{next_num:03d}.txt"
-    fname_in = input(f"\n  Save as [{suggested}]: ").strip()
-    fname = fname_in if fname_in else suggested
-    if not fname.endswith(".txt"):
-        fname += ".txt"
+    fname = f"chapter_{next_num:03d}.txt"
 
     # Gabungkan title + content
     full_content = f"{title}\n\n{content}" if title else content
