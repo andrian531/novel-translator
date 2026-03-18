@@ -627,6 +627,7 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
                 "Character profiles — aliases & honorifics:\n"
                 + "\n".join(profile_lines)
                 + "\nAlias rule: keep alias as used in source text; add (canonical name) on FIRST occurrence per chapter only."
+                + "\nNAME SPELLING IS FIXED: use the exact romanized_name listed above. Do NOT create variant spellings (e.g. if name is 'Borge', never write 'Bog', 'Bogg', or any other form)."
             )
     ref_block  = "\n".join(ref_lines) if ref_lines else "(no reference)"
     guide_block = f"\nTRANSLATION GUIDE (follow strictly):\n{guide_text}\n" if guide_text.strip() else ""
@@ -779,6 +780,7 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
                 "Character profiles — aliases & honorifics:\n"
                 + "\n".join(profile_lines)
                 + "\nAlias rule: keep alias as used in source text; add (canonical name) on FIRST occurrence per chapter only."
+                + "\nNAME SPELLING IS FIXED: use the exact romanized_name listed above. Do NOT create variant spellings (e.g. if name is 'Borge', never write 'Bog', 'Bogg', or any other form)."
             )
     ref_block = "\n".join(ref_lines) if ref_lines else "(no reference)"
 
@@ -953,13 +955,13 @@ def merge_reference(existing, new_data):
             if not ep.get("gender") or ep["gender"] == "unknown":
                 ep["gender"] = new_p.get("gender", ep.get("gender"))
             # Append new aliases not already present
-            existing_aliases = {a["romanized"].lower() for a in ep.get("aliases", []) if isinstance(a, dict)}
+            existing_aliases = {a.get("romanized", "").lower() for a in ep.get("aliases", []) if isinstance(a, dict) and a.get("romanized")}
             for alias in new_p.get("aliases", []):
-                if not isinstance(alias, dict):
+                if not isinstance(alias, dict) or not alias.get("romanized"):
                     continue
                 if alias.get("romanized", "").lower() not in existing_aliases:
                     ep.setdefault("aliases", []).append(alias)
-                    existing_aliases.add(alias["romanized"].lower())
+                    existing_aliases.add(alias.get("romanized", "").lower())
             # Append new relationships not already present
             existing_rels = {(r["with"], r["call_them"]) for r in ep.get("relationships", []) if isinstance(r, dict)}
             for rel in new_p.get("relationships", []):

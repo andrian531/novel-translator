@@ -13,7 +13,11 @@ A tool for translating web novels (Chinese/Japanese/Korean) with context awarene
 - **Crash recovery**: Progress saved to `temp/` inside each project folder — portable across machines
 - **Explicit content support**: Professional translator role prompt for adult fiction
 - **Website scraper**: Auto-explore and analyze novel websites, generate site configs; SPA sites (Vue/React `#/` routing) auto-detected and rendered via Playwright
-- **Add Raw Chapter**: Input chapter URL → auto-fetch title + content → save to raw/; unknown mirror auto-detected from project metadata
+- **Add Raw Chapter**: Input chapter URL → auto-fetch → save to raw/; loops for next URL automatically (Enter to exit); unknown mirror auto-detected from project metadata
+- **Duplicate detection**: Project menu auto-detects raw chapters with identical content and flags them with `[!!]`
+- **Re-translate chapter**: Pick any translated chapter and re-translate it with the latest reference, overwriting the existing file
+- **Continuity check**: Scan all translated chapters for character name inconsistencies (fuzzy match vs `character_profiles`); grouped by character with interactive fix/replace
+- **Name spelling enforcement**: Character `romanized_name` injected as fixed spelling rule — Gemini warned not to create variant spellings
 - **Search novel**: Browse rankings, search, scaffold project structure; results filtered by personal settings (exclude tags, display language)
 - **Search settings**: Auto-configured on first use, saved to `config/settings.json` (gitignored)
 - **Manual projects**: Copy raw chapters yourself, translate at your own pace
@@ -58,8 +62,8 @@ novel-translator/
 │       └── src/
 │           ├── views/
 │           │   ├── HomeView.vue    # Novel grid
-│           │   ├── NovelView.vue   # Chapter list
-│           │   └── ChapterView.vue # Chapter reader
+│           │   ├── NovelView.vue   # Novel info + chapter list
+│           │   └── ChapterView.vue # Chapter reader with sidebar TOC
 │           └── router/index.js
 └── manual_projects/
     └── [ProjectName]/
@@ -120,6 +124,13 @@ npm run dev
 ```
 
 The frontend proxies `/api` to `localhost:8000`. Displays translated novels with `title_translated` (target language title) when available, falling back to the original title.
+
+Reader features:
+- Collapsible sidebar (left) listing all chapters, current chapter highlighted
+- Dark mode toggle — respects system preference on first load, saved to localStorage
+- Font size controls (`A−` / `A+`) in chapter header, saved to localStorage
+- Keyboard navigation: `←` / `→` arrow keys for prev/next chapter
+- Reading progress saved per novel — "Continue reading" shortcut on HomeView and NovelView
 
 ## Requirements
 

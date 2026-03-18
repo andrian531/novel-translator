@@ -547,8 +547,21 @@ def manual_project_menu(project_id):
             print(f"  Copy .txt files to:")
             print(f"  {raw_path}\n")
         else:
+            # Detect duplicate raw chapters by content hash
+            import hashlib as _hl
+            _hash_to_first = {}   # md5 -> first filename
+            _duplicate_of  = {}   # filename -> original filename
+            for _fname in chapters:
+                _raw = pm.load_raw_chapter(project_id, _fname)
+                if _raw:
+                    _h = _hl.md5(_raw.encode("utf-8", errors="ignore")).hexdigest()
+                    if _h in _hash_to_first:
+                        _duplicate_of[_fname] = _hash_to_first[_h]
+                    else:
+                        _hash_to_first[_h] = _fname
+
             print()
-            print("  [✓] translated  [x] empty file  [ ] pending")
+            print("  [✓] translated  [x] empty  [ ] pending  [!!] duplicate")
             print()
             for i, fname in enumerate(chapters, 1):
                 if pm.is_chapter_translated(project_id, fname):
@@ -557,8 +570,13 @@ def manual_project_menu(project_id):
                     mark = "[x]"
                 else:
                     mark = "[ ]"
-                print(f"  {i:3}. {mark} {fname}")
+                dup_note = f"  ← DUP of {_duplicate_of[fname]}" if fname in _duplicate_of else ""
+                print(f"  {i:3}. {mark} {fname}{dup_note}")
             print()
+
+            if _duplicate_of:
+                print(f"  [!!] {len(_duplicate_of)} duplicate(s) detected — same content as another chapter.")
+                print()
 
         guide_exists  = bool(pm.load_translation_guide(project_id).get("guide_text"))
         guide_mark    = "[✓]" if guide_exists else "[ ]"
@@ -568,6 +586,7 @@ def manual_project_menu(project_id):
         total_mark = f" ({total_ch} ch)" if total_ch else ""
         print(f"[R] Refresh  [V] Reference  [S] Research {guide_mark}  [T] Translate Meta {trans_mark}")
         print(f"[U] Update Chapter Count{total_mark}  [G] Alt Titles  [I] Image Prompt  [A] Add Raw  [B] Back")
+        print(f"[X] Re-translate chapter  [C] Continuity check")
         if chapters:
             print(f"[1-{len(chapters)}] Translate chapter")
         print("-" * 56)
@@ -602,6 +621,10 @@ def manual_project_menu(project_id):
             input("Press Enter...")
         elif cmd == 'a':
             add_raw_chapter_from_url(project_id)
+        elif cmd == 'x':
+            retranslate_chapter(project_id)
+        elif cmd == 'c':
+            continuity_check(project_id)
         elif cmd == 'g':
             generate_alt_titles(project_id)
         elif cmd == 'i':
@@ -620,19 +643,27 @@ def manual_project_menu(project_id):
 def add_raw_chapter_from_url(project_id):
     """
     Fetch chapter content (+ title) dari URL lalu simpan ke raw folder.
-    - Konfirmasi title/paragraf hanya jika confidence rendah.
-    - Auto-tambah domain baru sebagai mirror di site JSON jika belum terdaftar.
+    Loop: setelah save otomatis minta URL berikutnya. Enter kosong = kembali ke menu.
     """
+    from engines.scraper_manager import ScraperManager
+    sm = ScraperManager()
+
+    print("\n[Add Raw Chapter from URL]  (Enter kosong = kembali ke menu)")
+    while True:
+        url = input("\nChapter URL: ").strip()
+        if not url:
+            return
+        _add_raw_single(project_id, url, sm=sm)
+
+
+def _add_raw_single(project_id, url, sm=None):
+    """Fetch dan simpan satu chapter dari URL. Dipanggil dari loop add_raw_chapter_from_url."""
     import os, json as _json
     from urllib.parse import urlparse
     from engines.scraper_manager import ScraperManager
 
-    print("\n[Add Raw Chapter from URL]")
-    url = input("Chapter URL: ").strip()
-    if not url:
-        return
-
-    sm = ScraperManager()
+    if sm is None:
+        sm = ScraperManager()
     scraper = sm.get_scraper(url)
 
     # Domain tidak dikenali → cari site dari source_url metadata proyek
@@ -726,7 +757,6 @@ def add_raw_chapter_from_url(project_id):
     print(f"\n  [OK] Saved: {fname} ({len(full_content)} chars)")
     if title:
         print(f"  Title: {title}")
-    input("Press Enter...")
 
 
 def _ensure_content_rating(project_id, meta):
@@ -1502,6 +1532,231 @@ def batch_translate_chapters(project_id, chapter_list):
     print("=" * 56)
     input("\nPress Enter to go back...")
 
+
+
+def retranslate_chapter(project_id):
+    """Re-translate satu chapter yang sudah ditranslate — overwrite dengan reference terbaru."""
+    clear_screen()
+    translated = pm.list_translated_chapters(project_id)
+    if not translated:
+        print("[-] No translated chapters found.")
+        input("Press Enter...")
+        return
+
+    print("=" * 56)
+    print("  RE-TRANSLATE CHAPTER")
+    print("=" * 56)
+    print("  Select a chapter to re-translate (overwrites existing):\n")
+    for i, fname in enumerate(translated, 1):
+        print(f"  {i:3}. {fname}")
+    print()
+    choice = input(f"Chapter number [1-{len(translated)}] or [B] Back: ").strip().lower()
+    if choice == 'b' or not choice:
+        return
+    if not choice.isdigit() or not (1 <= int(choice) <= len(translated)):
+        print("[-] Invalid selection.")
+        input("Press Enter...")
+        return
+
+    filename = translated[int(choice) - 1]
+    raw_text = pm.load_raw_chapter(project_id, filename)
+    if not raw_text:
+        print(f"[-] Raw file '{filename}' not found or empty — cannot re-translate.")
+        input("Press Enter...")
+        return
+
+    print(f"\n  Chapter : {filename}")
+    print(f"  Raw size: {len(raw_text)} chars")
+    confirm = input("\n  Overwrite existing translation? [y/N]: ").strip().lower()
+    if confirm != 'y':
+        return
+
+    manual_translate_chapter(project_id, filename)
+
+
+def continuity_check(project_id):
+    """
+    Scan semua translated chapter, flag nama karakter yang tidak konsisten
+    dengan character_profiles (romanized_name).
+    Menggunakan difflib untuk mendeteksi ejaan yang mirip tapi bukan canonical.
+    """
+    import difflib, re
+
+    clear_screen()
+    print("=" * 56)
+    print("  CONTINUITY CHECK")
+    print("=" * 56)
+
+    ref = pm.load_manual_reference(project_id)
+    profiles = ref.get("character_profiles", [])
+
+    if not profiles:
+        print("\n[-] No character profiles found in reference.json.")
+        print("    Run [S] Research first to generate character profiles.")
+        input("Press Enter...")
+        return
+
+    # Build set of canonical names and known aliases (all lowercase → canonical)
+    canonical_map = {}   # lower → display name
+    for p in profiles:
+        rname = p.get("romanized_name", "").strip()
+        if not rname:
+            continue
+        canonical_map[rname.lower()] = rname
+        for alias in p.get("aliases", []):
+            r = alias.get("romanized", "").strip()
+            if r:
+                canonical_map[r.lower()] = rname  # alias also accepted
+
+    if not canonical_map:
+        print("\n[-] Character profiles have no romanized names.")
+        input("Press Enter...")
+        return
+
+    canonical_names = list(canonical_map.keys())
+
+    translated = pm.list_translated_chapters(project_id)
+    if not translated:
+        print("\n[-] No translated chapters found.")
+        input("Press Enter...")
+        return
+
+    print(f"\n  Checking {len(translated)} chapters against {len([p for p in profiles if p.get('romanized_name')])} character names...\n")
+
+    # Common Indonesian words to skip (capitalized at sentence start but not names)
+    STOPWORDS_ID = {
+        "Dia", "Dan", "Ini", "Itu", "Ada", "Jika", "Tapi", "Atau", "Lain",
+        "Dari", "Pada", "Kami", "Kamu", "Aku", "Dia", "Mereka", "Kita",
+        "Namun", "Saat", "Akan", "Yang", "Untuk", "Tidak", "Dengan", "Sudah",
+        "Bisa", "Juga", "Sama", "Saja", "Atas", "Bawah", "Tanpa", "Lebih",
+        "Masih", "Hanya", "Semua", "Sangat", "Setelah", "Sebelum", "Karena",
+        "Tetapi", "Ketika", "Hingga", "Kepada", "Dalam", "Antara", "Bahwa",
+        "Saya", "Anda", "Beliau", "Tuan", "Nyonya", "Nona", "Kakak", "Adik",
+        "Ayah", "Ibu", "Paman", "Bibi", "Nenek", "Kakek",
+    }
+
+    # Regex: capitalized words (likely proper nouns), min 3 chars
+    word_re = re.compile(r'\b([A-Z][a-z]{2,})\b')
+
+    # by_canonical: {canonical_name -> {variant -> [filenames]}}
+    by_canonical = {}
+
+    for filename in translated:
+        text = pm.load_translated_chapter(project_id, filename)
+        words = set(word_re.findall(text))
+
+        for word in words:
+            if word in STOPWORDS_ID:
+                continue
+
+            wl = word.lower()
+            if wl in canonical_map:
+                continue   # exact match — fine
+
+            for cname_lower in canonical_names:
+                if abs(len(wl) - len(cname_lower)) > 3:
+                    continue
+                ratio = difflib.SequenceMatcher(None, wl, cname_lower).ratio()
+                if ratio >= 0.72 and ratio < 1.0:
+                    canonical_display = canonical_map[cname_lower]
+                    if canonical_display not in by_canonical:
+                        by_canonical[canonical_display] = {}
+                    if word not in by_canonical[canonical_display]:
+                        by_canonical[canonical_display][word] = []
+                    if filename not in by_canonical[canonical_display][word]:
+                        by_canonical[canonical_display][word].append(filename)
+                    break
+
+    if not by_canonical:
+        print("  [OK] No inconsistencies detected!\n")
+        input("Press Enter...")
+        return
+
+    # Display grouped by canonical character
+    def _show_results():
+        clear_screen()
+        print("=" * 56)
+        print("  CONTINUITY CHECK RESULTS")
+        print("=" * 56)
+        char_list = sorted(by_canonical.keys())
+        for idx, cname in enumerate(char_list, 1):
+            variants = by_canonical[cname]
+            total_chapters = set(ch for chs in variants.values() for ch in chs)
+            print(f"\n  [{idx}] {cname}  ({len(total_chapters)} chapter(s) affected)")
+            for variant, chapters in sorted(variants.items(), key=lambda x: -len(x[1])):
+                print(f"       '{variant}' → found in: {', '.join(chapters)}")
+        print()
+        print("-" * 56)
+        print("  [1-N] Fix character  [W] Write report  [Enter] Back")
+        return char_list
+
+    def _do_fix(cname):
+        """Replace semua variant → canonical di semua chapter yang terdampak."""
+        variants = by_canonical[cname]
+        affected = sorted(set(ch for chs in variants.values() for ch in chs))
+
+        clear_screen()
+        print(f"  Fix: '{cname}'")
+        print("  Variants to replace: " + ", ".join("'" + v + "'" for v in variants))
+        print(f"  Chapters affected  : {len(affected)}")
+        print()
+        for v, chs in variants.items():
+            for ch in chs:
+                text = pm.load_translated_chapter(project_id, ch)
+                count = len(re.findall(rf'\b{re.escape(v)}\b', text))
+                print(f"    '{v}' → '{cname}' in {ch}  ({count} occurrence(s))")
+        print()
+        confirm = input(f"  Replace ALL occurrences of these variants with '{cname}'? [y/N]: ").strip().lower()
+        if confirm != 'y':
+            print("  Cancelled.")
+            input("Press Enter...")
+            return
+
+        trans_dir = os.path.join(pm.MANUAL_DIR, project_id, "chapters", "translated")
+        total_replaced = 0
+        for filename in affected:
+            fpath = os.path.join(trans_dir, filename)
+            text = pm.load_translated_chapter(project_id, filename)
+            new_text = text
+            for variant in variants:
+                new_text, n = re.subn(rf'\b{re.escape(variant)}\b', cname, new_text)
+                total_replaced += n
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(new_text)
+            print(f"    [OK] {filename}")
+
+        # Remove fixed character from by_canonical so it disappears from results
+        del by_canonical[cname]
+
+        print(f"\n  [OK] {total_replaced} replacement(s) across {len(affected)} chapter(s).")
+        input("Press Enter...")
+
+    # Main interaction loop
+    while True:
+        char_list = _show_results()
+        if not by_canonical:
+            print("  [OK] All issues resolved!")
+            input("Press Enter...")
+            return
+        cmd = input("Choice: ").strip().lower()
+        if not cmd:
+            return
+        if cmd == 'w':
+            report_path = os.path.join(pm.MANUAL_DIR, project_id, "continuity_report.txt")
+            lines = [f"Continuity Check Report — {project_id}\n{'='*56}\n"]
+            for cname in sorted(by_canonical.keys()):
+                lines.append(f"[{cname}]")
+                for variant, chapters in by_canonical[cname].items():
+                    lines.append(f"  '{variant}' found in: {', '.join(chapters)}")
+                lines.append("")
+            with open(report_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            print(f"\n  [OK] Report saved: {report_path}")
+            input("Press Enter...")
+        elif cmd.isdigit() and 1 <= int(cmd) <= len(char_list):
+            _do_fix(char_list[int(cmd) - 1])
+        else:
+            return
 
 
 def generate_alt_titles(project_id):
