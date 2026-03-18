@@ -313,26 +313,32 @@ for /f "tokens=1,2 delims==" %%K in ('python "%SCRIPT_DIR%\check_gpu.py" detect 
 set "HF_HUB=%USERPROFILE%\.cache\huggingface\hub"
 set "NLLB_600M_DIR=!HF_HUB!\models--facebook--nllb-200-distilled-600M"
 set "NLLB_1B3_DIR=!HF_HUB!\models--facebook--nllb-200-distilled-1.3B"
+set "NLLB_3B3_DIR=!HF_HUB!\models--facebook--nllb-200-3.3B"
 
 set "NLLB_600M_ST=             "
 set "NLLB_1B3_ST=             "
+set "NLLB_3B3_ST=             "
 if exist "!NLLB_600M_DIR!\" set "NLLB_600M_ST=[downloaded]  "
 if exist "!NLLB_1B3_DIR!\"  set "NLLB_1B3_ST=[downloaded]  "
+if exist "!NLLB_3B3_DIR!\"  set "NLLB_3B3_ST=[downloaded]  "
 
 :NLLB_MODEL_LOOP
 echo.
 echo  NLLB Models (stored in: !HF_HUB!\):
 echo  -----------------------------------------------------------------
-echo   [1] nllb-200-distilled-600M   ~2.4 GB   !NLLB_600M_ST!
-echo   [2] nllb-200-distilled-1.3B   ~5.0 GB   !NLLB_1B3_ST!
+echo   [1] nllb-200-distilled-600M   ~2.4 GB   lightweight             !NLLB_600M_ST!
+echo   [2] nllb-200-distilled-1.3B   ~5.0 GB   balanced               !NLLB_1B3_ST!
+echo   [3] nllb-200-3.3B             ~13 GB    best quality (VRAM 8GB+)!NLLB_3B3_ST!
 echo   [S] Skip
 echo  -----------------------------------------------------------------
 echo   GPU recommendation: !NLLB_RECOMMENDED! model
 echo  -----------------------------------------------------------------
 echo.
-set /p NLLB_DL="  Choose [1-2 / S, default=!NLLB_RECOMMENDED:~0,1!]: "
+set /p NLLB_DL="  Choose [1-3 / S, default=!NLLB_RECOMMENDED:~0,1!]: "
 if "!NLLB_DL!"=="" (
-    if "!NLLB_RECOMMENDED!"=="1.3B" (
+    if "!NLLB_RECOMMENDED!"=="3.3B" (
+        set "NLLB_DL=3"
+    ) else if "!NLLB_RECOMMENDED!"=="1.3B" (
         set "NLLB_DL=2"
     ) else (
         set "NLLB_DL=1"
@@ -341,6 +347,7 @@ if "!NLLB_DL!"=="" (
 if /i "!NLLB_DL!"=="S" goto NLLB_DONE
 if "!NLLB_DL!"=="1" goto NLLB_DL_600M
 if "!NLLB_DL!"=="2" goto NLLB_DL_1B3
+if "!NLLB_DL!"=="3" goto NLLB_DL_3B3
 goto NLLB_MODEL_LOOP
 
 :NLLB_DL_600M
@@ -365,6 +372,18 @@ if errorlevel 1 (
 )
 echo  [OK] nllb-200-distilled-1.3B downloaded
 echo 1.3B> "%SCRIPT_DIR%\.nllb"
+goto NLLB_DONE
+
+:NLLB_DL_3B3
+echo.
+echo  Downloading nllb-200-3.3B (~13 GB, may take a while)...
+python -c "from transformers import AutoModelForSeq2SeqLM, AutoTokenizer; AutoTokenizer.from_pretrained('facebook/nllb-200-3.3B'); AutoModelForSeq2SeqLM.from_pretrained('facebook/nllb-200-3.3B')"
+if errorlevel 1 (
+    echo  [ERROR] Download failed. Check internet connection and retry.
+    goto NLLB_MODEL_LOOP
+)
+echo  [OK] nllb-200-3.3B downloaded
+echo 3.3B> "%SCRIPT_DIR%\.nllb"
 
 :NLLB_DONE
 

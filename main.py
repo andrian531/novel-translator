@@ -586,7 +586,7 @@ def manual_project_menu(project_id):
         total_mark = f" ({total_ch} ch)" if total_ch else ""
         print(f"[R] Refresh  [V] Reference  [S] Research {guide_mark}  [T] Translate Meta {trans_mark}")
         print(f"[U] Update Chapter Count{total_mark}  [G] Alt Titles  [I] Image Prompt  [A] Add Raw  [B] Back")
-        print(f"[X] Re-translate chapter  [C] Continuity check")
+        print(f"[X] Re-translate chapter  [C] Continuity check  [Y] Sync Reference")
         if chapters:
             print(f"[1-{len(chapters)}] Translate chapter")
         print("-" * 56)
@@ -625,6 +625,8 @@ def manual_project_menu(project_id):
             retranslate_chapter(project_id)
         elif cmd == 'c':
             continuity_check(project_id)
+        elif cmd == 'y':
+            sync_reference(project_id)
         elif cmd == 'g':
             generate_alt_titles(project_id)
         elif cmd == 'i':
@@ -1201,12 +1203,18 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
 
     # Select engine — hanya jika belum ditentukan (single mode)
     if engine_mode is None:
+        import engines.nllb as _nllb
+        nllb_info = _nllb.get_model_info() if _nllb.is_available() else "NOT INSTALLED"
         print("Translation engine:")
         print("  1. Gemini + Ollama           (Gemini: guide/analysis only — Ollama: all translation, hemat)")
         print("  2. Ollama only               (local, offline, no Gemini at all)")
         print("  3. Gemini primary + Ollama backup  (Gemini tiap chunk, Ollama backup jika Gemini gagal)")
         print("  4. Gemini + gemma3           (Gemini: guide/analysis only — gemma3: semua terjemahan)")
         print("  5. Gemini + translategemma   (Gemini: guide/analysis only — translategemma: semua terjemahan)")
+        print(f"  --- [EXPERIMENT] NLLB: {nllb_info} ---")
+        print("  6. NLLB + Gemini             (NLLB: CN→EN pivot — Gemini: EN→ID refine, Ollama fallback)")
+        print("  7. NLLB + translategemma     (NLLB: CN→EN pivot — translategemma: EN→ID, Gemini guide)")
+        print("  8. NLLB + gemma3             (NLLB: CN→EN pivot — gemma3: EN→ID, Gemini guide)")
         eng_c = input("Choice [1]: ").strip()
         if eng_c == "2":
             engine_mode = "ollama"
@@ -1216,6 +1224,12 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             engine_mode = "gemini_gemma3"
         elif eng_c == "5":
             engine_mode = "gemini_translategemma"
+        elif eng_c == "6":
+            engine_mode = "nllb_gemini"
+        elif eng_c == "7":
+            engine_mode = "nllb_translategemma"
+        elif eng_c == "8":
+            engine_mode = "nllb_gemma3"
         else:
             engine_mode = "gemini_fallback"
     print()
@@ -1288,7 +1302,10 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
                     "gemini_only": "Gemini only",
                     "ollama": "Ollama local",
                     "gemini_gemma3": "Gemini + gemma3",
-                    "gemini_translategemma": "Gemini + translategemma"}.get(engine_mode, engine_mode)
+                    "gemini_translategemma": "Gemini + translategemma",
+                    "nllb_gemini": "NLLB pivot + Gemini refine",
+                    "nllb_translategemma": "NLLB pivot + translategemma refine",
+                    "nllb_gemma3": "NLLB pivot + gemma3 refine"}.get(engine_mode, engine_mode)
     print(f"[2/3] Translating... (~{chunks_est} chunks) | Engine: {engine_label}\n")
 
     def _progress(n, total, engine):
@@ -1343,6 +1360,19 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             source_lang=_src_lang,
             is_explicit=is_explicit,
             temp_dir=_temp_dir,
+        )
+    elif engine_mode in ("nllb_gemini", "nllb_translategemma", "nllb_gemma3"):
+        refine = {"nllb_gemini": "gemini", "nllb_translategemma": "translategemma", "nllb_gemma3": "gemma3"}[engine_mode]
+        translated, stats = tr.translate_with_nllb_pivot(
+            raw_text, ref, target,
+            ollama_models=models,
+            chunk_size=2000,
+            progress_cb=_progress,
+            guide_text=guide_text,
+            source_lang=_src_lang,
+            is_explicit=is_explicit,
+            temp_dir=_temp_dir,
+            refine_engine=refine,
         )
     else:
         # gemini_fallback: Gemini hanya untuk analisis/guide — Ollama menerjemahkan semua chunk
@@ -1423,6 +1453,9 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
     save_path = pm.save_manual_chapter_translated(project_id, filename, translated)
     print(f"     Saved: {save_path}")
 
+    # Update name index (for continuity check)
+    _update_name_index(project_id, filename, translated, ref.get("character_profiles", []))
+
     # Step 4: Generate rolling summary & update chapter_context.json
     novel_title = meta.get("title", project_id)
     ch_ctx = pm.load_chapter_context(project_id)
@@ -1486,12 +1519,18 @@ def batch_translate_chapters(project_id, chapter_list):
     print()
 
     # Pilih engine sekali untuk semua chapter
+    import engines.nllb as _nllb
+    nllb_info = _nllb.get_model_info() if _nllb.is_available() else "NOT INSTALLED"
     print("Translation engine (applies to ALL chapters):")
     print("  1. Gemini + Ollama           (Gemini: guide/analysis only — Ollama: all translation, hemat)")
     print("  2. Ollama only               (local, offline, no Gemini at all)")
     print("  3. Gemini primary + Ollama backup  (Gemini tiap chunk, Ollama backup jika Gemini gagal)")
     print("  4. Gemini + gemma3           (Gemini: guide/analysis only — gemma3: semua terjemahan)")
     print("  5. Gemini + translategemma   (Gemini: guide/analysis only — translategemma: semua terjemahan)")
+    print(f"  --- [EXPERIMENT] NLLB: {nllb_info} ---")
+    print("  6. NLLB + Gemini             (NLLB: CN→EN pivot — Gemini: EN→ID refine, Ollama fallback)")
+    print("  7. NLLB + translategemma     (NLLB: CN→EN pivot — translategemma: EN→ID, Gemini guide)")
+    print("  8. NLLB + gemma3             (NLLB: CN→EN pivot — gemma3: EN→ID, Gemini guide)")
     eng_c = input("Choice [1]: ").strip()
     if eng_c == "2":
         engine_mode = "ollama"
@@ -1501,6 +1540,12 @@ def batch_translate_chapters(project_id, chapter_list):
         engine_mode = "gemini_gemma3"
     elif eng_c == "5":
         engine_mode = "gemini_translategemma"
+    elif eng_c == "6":
+        engine_mode = "nllb_gemini"
+    elif eng_c == "7":
+        engine_mode = "nllb_translategemma"
+    elif eng_c == "8":
+        engine_mode = "nllb_gemma3"
     else:
         engine_mode = "gemini_fallback"
 
@@ -1574,13 +1619,33 @@ def retranslate_chapter(project_id):
     manual_translate_chapter(project_id, filename)
 
 
+def _update_name_index(project_id, filename, translated_text, profiles):
+    """Update character_appearances.json: catat canonical names yang muncul di chapter."""
+    import re, json
+    index_path = os.path.join(pm.MANUAL_DIR, project_id, "character_appearances.json")
+    try:
+        index = json.load(open(index_path, encoding='utf-8')) if os.path.exists(index_path) else {}
+    except Exception:
+        index = {}
+    found = []
+    for p in profiles:
+        rname = p.get("romanized_name", "").strip()
+        if not rname:
+            continue
+        if re.search(r'\b' + re.escape(rname) + r'\b', translated_text, re.IGNORECASE):
+            found.append(rname)
+    index[filename] = found
+    with open(index_path, 'w', encoding='utf-8') as f:
+        json.dump(index, f, ensure_ascii=False, indent=2)
+
+
 def continuity_check(project_id):
     """
-    Scan semua translated chapter, flag nama karakter yang tidak konsisten
-    dengan character_profiles (romanized_name).
-    Menggunakan difflib untuk mendeteksi ejaan yang mirip tapi bukan canonical.
+    Scan semua translated chapter, flag nama karakter yang tidak konsisten.
+    Menggunakan character_appearances.json sebagai index — hanya cek chapter
+    di mana karakter diketahui muncul, dengan filter huruf awal yang sama.
     """
-    import difflib, re
+    import difflib, re, json
 
     clear_screen()
     print("=" * 56)
@@ -1604,7 +1669,10 @@ def continuity_check(project_id):
             continue
         canonical_map[rname.lower()] = rname
         for alias in p.get("aliases", []):
-            r = alias.get("romanized", "").strip()
+            if isinstance(alias, dict):
+                r = alias.get("romanized", "").strip()
+            else:
+                r = str(alias).strip()
             if r:
                 canonical_map[r.lower()] = rname  # alias also accepted
 
@@ -1621,9 +1689,26 @@ def continuity_check(project_id):
         input("Press Enter...")
         return
 
+    # Load name index (chapter → list of canonical names that appear)
+    index_path = os.path.join(pm.MANUAL_DIR, project_id, "character_appearances.json")
+    try:
+        name_index = json.load(open(index_path, encoding='utf-8')) if os.path.exists(index_path) else {}
+    except Exception:
+        name_index = {}
+
+    # Rebuild index for chapters that aren't indexed yet
+    for filename in translated:
+        if filename not in name_index:
+            text = pm.load_translated_chapter(project_id, filename)
+            _update_name_index(project_id, filename, text, profiles)
+            found = [p.get("romanized_name","") for p in profiles
+                     if p.get("romanized_name") and
+                     re.search(r'\b' + re.escape(p["romanized_name"]) + r'\b', text, re.IGNORECASE)]
+            name_index[filename] = found
+
     print(f"\n  Checking {len(translated)} chapters against {len([p for p in profiles if p.get('romanized_name')])} character names...\n")
 
-    # Common Indonesian words to skip (capitalized at sentence start but not names)
+    # Stopwords: kata Indonesia umum yang bentuknya mirip nama tapi bukan nama
     STOPWORDS_ID = {
         "Dia", "Dan", "Ini", "Itu", "Ada", "Jika", "Tapi", "Atau", "Lain",
         "Dari", "Pada", "Kami", "Kamu", "Aku", "Dia", "Mereka", "Kita",
@@ -1633,10 +1718,14 @@ def continuity_check(project_id):
         "Tetapi", "Ketika", "Hingga", "Kepada", "Dalam", "Antara", "Bahwa",
         "Saya", "Anda", "Beliau", "Tuan", "Nyonya", "Nona", "Kakak", "Adik",
         "Ayah", "Ibu", "Paman", "Bibi", "Nenek", "Kakek",
+        # Kata umum yang sering false-positive dengan nama karakter
+        "Mana", "Anak", "Aliran", "Angin", "Asing", "Alam", "Awal",
+        "Borgol", "Bukan", "Berkas", "Badan", "Bagian",
+        "Udara", "Usia", "Ujung",
     }
 
     # Regex: capitalized words (likely proper nouns), min 3 chars
-    word_re = re.compile(r'\b([A-Z][a-z]{2,})\b')
+    word_re = re.compile(r'\b([A-Z][a-zA-Z]{2,})\b')
 
     # by_canonical: {canonical_name -> {variant -> [filenames]}}
     by_canonical = {}
@@ -1644,6 +1733,12 @@ def continuity_check(project_id):
     for filename in translated:
         text = pm.load_translated_chapter(project_id, filename)
         words = set(word_re.findall(text))
+
+        # Ambil hanya karakter yang diketahui muncul di chapter ini (dari index)
+        chars_in_chapter = name_index.get(filename, list(canonical_map.values()))
+        active_canonicals = {c.lower(): canonical_map[c.lower()]
+                             for c in [n.lower() for n in chars_in_chapter]
+                             if c.lower() in canonical_map}
 
         for word in words:
             if word in STOPWORDS_ID:
@@ -1653,12 +1748,16 @@ def continuity_check(project_id):
             if wl in canonical_map:
                 continue   # exact match — fine
 
-            for cname_lower in canonical_names:
-                if abs(len(wl) - len(cname_lower)) > 3:
+            for cname_lower, canonical_display in active_canonicals.items():
+                # Filter 1: huruf awal harus sama (case-insensitive)
+                if wl[0] != cname_lower[0]:
                     continue
+                # Filter 2: panjang tidak boleh beda lebih dari 2
+                if abs(len(wl) - len(cname_lower)) > 2:
+                    continue
+                # Filter 3: similarity ratio ≥ 0.75
                 ratio = difflib.SequenceMatcher(None, wl, cname_lower).ratio()
-                if ratio >= 0.72 and ratio < 1.0:
-                    canonical_display = canonical_map[cname_lower]
+                if ratio >= 0.75 and ratio < 1.0:
                     if canonical_display not in by_canonical:
                         by_canonical[canonical_display] = {}
                     if word not in by_canonical[canonical_display]:
@@ -1757,6 +1856,195 @@ def continuity_check(project_id):
             _do_fix(char_list[int(cmd) - 1])
         else:
             return
+
+
+def _save_reference_snapshot(project_id):
+    """Simpan snapshot reference.json saat ini sebagai baseline untuk sync berikutnya."""
+    import json
+    ref_path  = os.path.join(pm.MANUAL_DIR, project_id, "reference.json")
+    snap_path = os.path.join(pm.MANUAL_DIR, project_id, "reference_snapshot.json")
+    if os.path.exists(ref_path):
+        import shutil
+        shutil.copy2(ref_path, snap_path)
+
+
+def sync_reference(project_id):
+    """
+    Bandingkan reference.json dengan reference_snapshot.json.
+    Setiap nilai yang berubah → replace di semua translated chapters.
+    Setelah selesai, update snapshot.
+    """
+    import json, re
+
+    clear_screen()
+    print("=" * 56)
+    print("  SYNC REFERENCE → TRANSLATED CHAPTERS")
+    print("=" * 56)
+
+    ref_path  = os.path.join(pm.MANUAL_DIR, project_id, "reference.json")
+    snap_path = os.path.join(pm.MANUAL_DIR, project_id, "reference_snapshot.json")
+
+    if not os.path.exists(snap_path):
+        print("\n[-] Snapshot tidak ditemukan. Membuat snapshot sekarang...")
+        _save_reference_snapshot(project_id)
+        print("  [OK] Snapshot dibuat. Edit reference.json lalu jalankan Sync lagi.")
+        input("Press Enter...")
+        return
+
+    ref  = json.load(open(ref_path,  encoding='utf-8'))
+    snap = json.load(open(snap_path, encoding='utf-8'))
+
+    # ── Build replacement map: old_value → new_value ──────────────────────────
+    replace_map = {}  # {old_str: new_str}
+
+    def _add(old, new):
+        old, new = str(old).strip(), str(new).strip()
+        if old and new and old != new:
+            replace_map[old] = new
+
+    # 1. Flat dicts: characters, locations, terms, modern_terms
+    for key in ("characters", "locations", "terms", "modern_terms"):
+        old_dict = snap.get(key, {})
+        new_dict = ref.get(key, {})
+        # Changed values
+        for k in old_dict:
+            if k in new_dict and old_dict[k] != new_dict[k]:
+                _add(old_dict[k], new_dict[k])
+        # Also check if key itself renamed (old key not in new → find by similar value)
+        # (skip for now — too ambiguous)
+
+    # 2. character_profiles: romanized_name + aliases
+    old_profiles = {p.get("romanized_name",""): p for p in snap.get("character_profiles", []) if p.get("romanized_name")}
+    new_profiles = {p.get("romanized_name",""): p for p in ref.get("character_profiles", [])  if p.get("romanized_name")}
+
+    for old_name, old_p in old_profiles.items():
+        # Name itself changed
+        if old_name not in new_profiles:
+            # Find by matching original_name or first alias
+            for new_name, new_p in new_profiles.items():
+                if new_p.get("original_name") == old_p.get("original_name"):
+                    _add(old_name, new_name)
+                    old_name = new_name  # track for alias comparison
+                    break
+        # Aliases changed
+        new_p = new_profiles.get(old_name, {})
+        old_aliases = old_p.get("aliases", [])
+        new_aliases = new_p.get("aliases", [])
+        for i, old_a in enumerate(old_aliases):
+            old_r = old_a.get("romanized","").strip() if isinstance(old_a, dict) else str(old_a).strip()
+            if i < len(new_aliases):
+                new_a = new_aliases[i]
+                new_r = new_a.get("romanized","").strip() if isinstance(new_a, dict) else str(new_a).strip()
+                _add(old_r, new_r)
+
+    if not replace_map:
+        print("\n  [OK] Tidak ada perubahan terdeteksi antara reference dan snapshot.")
+        print("  (Edit reference.json terlebih dahulu, lalu jalankan Sync)")
+        input("Press Enter...")
+        return
+
+    def _make_pattern(s):
+        escaped = re.escape(s)
+        return r'(?<!\w)' + escaped + r'(?!\w)'
+
+    translated = pm.list_translated_chapters(project_id)
+    if not translated:
+        print("\n[-] Tidak ada translated chapter.")
+        input("Press Enter...")
+        return
+
+    # ── Scan occurrences ──────────────────────────────────────────────────────
+    print("  Mencari occurrence di translated chapters...\n")
+    preview = {}  # {filename: {old: [line_numbers]}}
+    for fname in translated:
+        text = pm.load_translated_chapter(project_id, fname)
+        lines = text.splitlines()
+        for old in replace_map:
+            pat = _make_pattern(old)
+            matched_lines = [i+1 for i, l in enumerate(lines) if re.search(pat, l, re.IGNORECASE)]
+            if matched_lines:
+                preview.setdefault(fname, {})[old] = matched_lines
+
+    # ── Tampilkan laporan lengkap ─────────────────────────────────────────────
+    print("=" * 56)
+    print("  LAPORAN PERUBAHAN")
+    print("=" * 56)
+    print(f"\n  Perubahan di reference ({len(replace_map)} item):")
+    for old, new in replace_map.items():
+        total_occ = sum(len(v.get(old,[])) for v in preview.values())
+        found_str = f"{total_occ} occurrence di {sum(1 for v in preview.values() if old in v)} chapter(s)" if total_occ else "tidak ditemukan di chapters"
+        print(f"    '{old}'  →  '{new}'  [{found_str}]")
+
+    if preview:
+        print(f"\n  Detail lokasi:")
+        for fname in sorted(preview):
+            for old, linenos in preview[fname].items():
+                lines_str = ", ".join(str(n) for n in linenos[:10])
+                if len(linenos) > 10:
+                    lines_str += f"... (+{len(linenos)-10})"
+                print(f"    {fname} baris {lines_str}  →  '{old}'")
+    else:
+        print("\n  [INFO] Tidak ada occurrence ditemukan di translated chapters.")
+
+    print()
+    confirm = input("  Lanjutkan sync? [y/N]: ").strip().lower()
+    if confirm != 'y':
+        print("  Dibatalkan. Snapshot tidak diupdate.")
+        input("Press Enter...")
+        return
+
+    if not preview:
+        # Tidak ada yang perlu direplace, tapi user konfirmasi → update snapshot
+        _save_reference_snapshot(project_id)
+        print("  Snapshot diupdate (tidak ada chapter yang berubah).")
+        input("Press Enter...")
+        return
+
+    # ── Apply replacements ────────────────────────────────────────────────────
+    import datetime
+    trans_dir = os.path.join(pm.MANUAL_DIR, project_id, "chapters", "translated")
+    log_lines = [
+        f"SYNC REFERENCE LOG",
+        f"Project  : {project_id}",
+        f"Waktu    : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"=" * 56,
+        f"Perubahan reference:",
+    ]
+    for old, new in replace_map.items():
+        log_lines.append(f"  '{old}'  →  '{new}'")
+    log_lines.append(f"\nHasil replace:")
+
+    total_replaced = 0
+    for fname in sorted(preview):
+        text = pm.load_translated_chapter(project_id, fname)
+        new_text = text
+        file_total = 0
+        for old, new in replace_map.items():
+            new_text, n = re.subn(_make_pattern(old), new, new_text, flags=re.IGNORECASE)
+            total_replaced += n
+            file_total += n
+        fpath = os.path.join(trans_dir, fname)
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(new_text)
+        print(f"  [OK] {fname}  ({file_total} replacement)")
+        log_lines.append(f"  {fname}: {file_total} replacement(s)")
+
+    # Tulis log file
+    log_path = os.path.join(pm.MANUAL_DIR, project_id, "sync_log.txt")
+    log_exists = os.path.exists(log_path)
+    with open(log_path, "a", encoding="utf-8") as f:
+        if log_exists:
+            f.write("\n\n")
+        f.write("\n".join(log_lines))
+        f.write(f"\n\nTotal: {total_replaced} replacement(s) di {len(preview)} chapter(s).")
+
+    # Update snapshot
+    _save_reference_snapshot(project_id)
+
+    print(f"\n  [OK] {total_replaced} replacement(s) di {len(preview)} chapter(s).")
+    print(f"  Log disimpan: sync_log.txt")
+    print("  Snapshot diupdate.")
+    input("Press Enter...")
 
 
 def generate_alt_titles(project_id):

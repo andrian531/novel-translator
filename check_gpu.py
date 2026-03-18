@@ -85,7 +85,9 @@ def ollama_recommendation(vram_gb):
         return "qwen2.5:3b", f"{vram_gb}GB VRAM: only small models, consider CPU mode"
 
 def nllb_recommendation(vram_gb):
-    if vram_gb >= 4:
+    if vram_gb >= 8:
+        return "3.3B", "8GB+ VRAM: 3.3B model gives best quality"
+    elif vram_gb >= 4:
         return "1.3B", "4GB+ VRAM: 1.3B model gives better accuracy"
     else:
         return "600M", "<4GB VRAM: 600M model is safer"

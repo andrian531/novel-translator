@@ -408,7 +408,7 @@ def analyze_chapter_with_context(raw_text, context="", existing_reference=None):
             for p in profiles:
                 rname = p.get('romanized_name', p.get('original_name', '?'))
                 aliases = p.get("aliases", [])
-                alias_str = ", ".join(a["romanized"] for a in aliases) if aliases else "-"
+                alias_str = ", ".join(a["romanized"] if isinstance(a, dict) else str(a) for a in aliases) if aliases else "-"
                 profile_lines.append(f"  {rname} | aliases: {alias_str}")
                 for r in p.get("relationships", []):
                     profile_lines.append(
@@ -614,7 +614,7 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
             aliases = p.get("aliases", [])
             if aliases:
                 alias_parts = ", ".join(
-                    f"\"{a['romanized']}\" ({a.get('context', '')})" for a in aliases
+                    f"\"{a['romanized']}\" ({a.get('context', '')})" if isinstance(a, dict) else f"\"{a}\"" for a in aliases
                 )
                 profile_lines.append(f"  {base} | aliases: {alias_parts}")
             for r in p.get("relationships", []):
@@ -767,7 +767,7 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
             aliases = p.get("aliases", [])
             if aliases:
                 alias_parts = ", ".join(
-                    f"\"{a['romanized']}\" ({a.get('context', '')})" for a in aliases
+                    f"\"{a['romanized']}\" ({a.get('context', '')})" if isinstance(a, dict) else f"\"{a}\"" for a in aliases
                 )
                 profile_lines.append(f"  {base} | aliases: {alias_parts}")
             for r in p.get("relationships", []):
@@ -1095,4 +1095,180 @@ def generate_chapter_summary(translated_text, chapter_name, novel_title,
     except json.JSONDecodeError as e:
         logger.error(f"[Gemini] Failed to parse summary JSON: {e}")
         return None
+
+
+def translate_with_nllb_pivot(raw_text, reference, target_lang,
+                               ollama_models=None, chunk_size=2000,
+                               progress_cb=None, guide_text="",
+                               source_lang="Chinese", is_explicit=False,
+                               temp_dir=None, refine_engine="gemini"):
+    """
+    NLLB pivot pipeline:
+      1. NLLB translate source → English (pivot)
+      2. Refine engine (Gemini / Ollama) translate English → target_lang with context
+
+    refine_engine: "gemini"        → Gemini refine, Ollama fallback
+                   "translategemma" → translategemma:12b refine, Gemini guide
+                   "gemma3"        → gemma3:12b refine, Gemini guide
+    """
+    from engines import nllb as nllb_engine
+
+    if not nllb_engine.is_available():
+        logger.error("[NLLB] Model tidak tersedia. Install via install.bat.")
+        return None, None
+
+    src_lang_key = source_lang.lower().replace(" ", "_")
+    pivot = nllb_engine.PIVOT_LANG.get(src_lang_key)
+    profiles = reference.get("character_profiles", [])
+
+    # Step 1 — NLLB translate (with name placeholder protection)
+    if pivot:
+        if progress_cb:
+            progress_cb(0, 2, "NLLB translating...")
+        logger.info(f"[NLLB] {source_lang} → {pivot} ({nllb_engine.get_model_info()})")
+        print(f"\n  [NLLB] Step 1/2: {source_lang} → English via {nllb_engine.get_model_info()}...", flush=True)
+
+        pivot_text, nllb_stats, cjk_remaining = nllb_engine.translate_text(
+            raw_text, src_lang_key, pivot, chunk_size=800, profiles=profiles
+        )
+        if not pivot_text:
+            logger.error("[NLLB] Pivot translation failed.")
+            return None, None
+
+        nllb_chunks = nllb_stats.get("nllb", 0)
+        if cjk_remaining:
+            print(f"  [NLLB] Step 1 done: {nllb_chunks} chunks. CJK remaining: {cjk_remaining}", flush=True)
+        else:
+            print(f"  [NLLB] Step 1 done: {nllb_chunks} chunks. No CJK remaining.", flush=True)
+        intermediate = pivot_text
+        intermediate_lang = "English"
+    else:
+        intermediate = raw_text
+        intermediate_lang = "English"
+        nllb_chunks = 0
+        cjk_remaining = []
+
+    # Step 2 — AI refine: English → target_lang with context
+    print(f"\n  [NLLB] Step 2/2: Refining {intermediate_lang} → {target_lang} with context...", flush=True)
+
+    # Build reference block
+    ref_lines = []
+    if reference.get("characters"):
+        names = ", ".join(f"{k}={v}" for k, v in reference["characters"].items())
+        ref_lines.append(f"Characters (keep as-is): {names}")
+    if reference.get("locations"):
+        locs = ", ".join(f"{k}={v}" for k, v in reference["locations"].items())
+        ref_lines.append(f"Locations: {locs}")
+    if reference.get("terms"):
+        terms = ", ".join(f"{k}={v}" for k, v in reference["terms"].items())
+        ref_lines.append(f"Special terms: {terms}")
+    if profiles:
+        profile_lines = []
+        for p in profiles:
+            rname = p.get('romanized_name', p.get('original_name', '?'))
+            aliases = p.get("aliases", [])
+            alias_str = ", ".join(
+                a["romanized"] if isinstance(a, dict) else str(a) for a in aliases
+            ) if aliases else "-"
+            profile_lines.append(f"  {rname} | aliases: {alias_str}")
+        if profile_lines:
+            ref_lines.append("Character profiles:\n" + "\n".join(profile_lines))
+    ref_block = "\n".join(ref_lines) if ref_lines else "(no reference)"
+    guide_block = f"\nTRANSLATION GUIDE:\n{guide_text}\n" if guide_text.strip() else ""
+
+    # CJK warning block — tell AI to translate any remaining Chinese chars
+    cjk_block = ""
+    if cjk_remaining:
+        cjk_list = ", ".join(f'"{c}"' for c in cjk_remaining[:20])
+        cjk_block = (
+            f"IMPORTANT: The English draft may still contain untranslated Chinese characters "
+            f"(e.g. {cjk_list}). Translate ALL of them into {target_lang} — do NOT leave any "
+            f"Chinese characters in the output.\n\n"
+        )
+
+    role_prefix = _EXPLICIT_ROLE if is_explicit else ""
+
+    # Split intermediate into chunks for refine pass
+    chunks = _split_by_paragraphs(intermediate, chunk_size)
+    total = len(chunks)
+    results = []
+    stats = {"nllb": nllb_chunks, "gemini": 0, "ollama": 0, "failed": 0}
+    prev_context = ""
+
+    for i, chunk in enumerate(chunks, 1):
+        if progress_cb:
+            progress_cb(i, total, f"Refine({refine_engine})")
+
+        context_block = (
+            f"PREVIOUS CONTEXT (already translated, do NOT retranslate):\n{prev_context}\n\n"
+            if prev_context else ""
+        )
+        prompt = (
+            f"{role_prefix}"
+            f"You are refining a machine-translated English draft of a web novel into {target_lang}.\n"
+            f"The English text was auto-translated from {source_lang} — it may be stiff or awkward.\n"
+            f"OUTPUT MUST BE IN {target_lang} ONLY. Do NOT output English or Chinese.\n"
+            f"{cjk_block}"
+            f"{guide_block}\n"
+            f"REFERENCE (proper nouns — keep exact spelling):\n{ref_block}\n\n"
+            f"{context_block}"
+            f"Translate/refine ONLY the text below into natural {target_lang}. "
+            f"Output ONLY the translation, no notes:\n\n{chunk}"
+        )
+
+        result, engine_used = None, "FAILED"
+
+        if refine_engine == "gemini":
+            # Gemini primary, Ollama fallback
+            gemini_out = _run_gemini(prompt, timeout=90)
+            if gemini_out and not _is_censored(gemini_out):
+                result = gemini_out
+                stats["gemini"] += 1
+                engine_used = "Gemini"
+            else:
+                # Ollama fallback
+                if ollama_models is None:
+                    ollama_models = get_available_models(source_lang)
+                for model in (ollama_models or []):
+                    out = _run_ollama(model, prompt, timeout=120)
+                    if out and not _is_censored(out):
+                        result = out
+                        stats["ollama"] += 1
+                        engine_used = f"Ollama({model})"
+                        break
+        else:
+            # Ollama-only refine (translategemma or gemma3), Gemini only for guide
+            model_filter = "translategemma" if refine_engine == "translategemma" else "gemma3"
+            if ollama_models is None:
+                ollama_models = get_available_models(source_lang)
+            filtered = [m for m in (ollama_models or []) if model_filter in m]
+            if not filtered:
+                filtered = ollama_models or []
+            for model in filtered:
+                out = _run_ollama(model, prompt, timeout=120)
+                if out and not _is_censored(out):
+                    result = out
+                    stats["ollama"] += 1
+                    engine_used = f"Ollama({model})"
+                    break
+            # Gemini fallback if Ollama failed
+            if not result:
+                gemini_out = _run_gemini(prompt, timeout=90)
+                if gemini_out and not _is_censored(gemini_out):
+                    result = gemini_out
+                    stats["gemini"] += 1
+                    engine_used = "Gemini(fallback)"
+
+        if result:
+            results.append(result)
+            sentences = result.split(".")
+            prev_context = ". ".join(s.strip() for s in sentences[-3:] if s.strip())
+        else:
+            results.append(chunk)  # keep English draft on total failure
+            stats["failed"] += 1
+            logger.warning(f"[NLLB-refine] Chunk {i}/{total} failed — keeping English draft.")
+
+    translated = "\n\n".join(results)
+    logger.info(f"[NLLB] Done. nllb={stats['nllb']} gemini={stats['gemini']} ollama={stats['ollama']} failed={stats['failed']}")
+    return translated, stats
 
