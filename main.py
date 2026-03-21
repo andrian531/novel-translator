@@ -105,14 +105,14 @@ def browse_rankings(scraper):
             rank_label = labels[int(idx)-1]
             rank_id = rankings[rank_label]
 
-            # Pilih bahasa SEBELUM fetch
+            # Select display language BEFORE fetch
             clear_screen()
             print(f"--- {rank_label} ---")
-            print("Pilih bahasa tampilan:")
+            print("Select display language:")
             print("  1. Indonesian")
             print("  2. English")
-            print("  3. Tampilkan asli (China)")
-            lang_choice = input("\nPilihan [1]: ").strip()
+            print("  3. Show original (Chinese)")
+            lang_choice = input("\nChoice [1]: ").strip()
             if lang_choice == "2":
                 display_lang = "English"
             elif lang_choice == "3":
@@ -128,7 +128,7 @@ def show_rank_results(scraper, rank_id, rank_label, display_lang=None):
         clear_screen()
         print(f"--- {rank_label} (Page {page}) ---")
         if display_lang:
-            print(f"Fetching & translating to {display_lang}... harap tunggu.")
+            print(f"Fetching & translating to {display_lang}... please wait.")
         else:
             print("Fetching results...")
 
@@ -145,7 +145,7 @@ def show_rank_results(scraper, rank_id, rank_label, display_lang=None):
 
         if not novels:
             print("[-] No results found or site blocked access (403).")
-            print("[TIP] Check scraper_logs/ atau coba site lain.")
+            print("[TIP] Check scraper_logs/ or try another site.")
             input("\nPress Enter to go back...")
             break
 
@@ -155,7 +155,7 @@ def show_rank_results(scraper, rank_id, rank_label, display_lang=None):
             print(f"   > {syn}")
             print("-" * 40)
 
-        print(f"\n[N] Next | [P] Prev | [L] View Log | [1-{len(novels)}] Pilih Novel | [B] Back")
+        print(f"\n[N] Next | [P] Prev | [L] View Log | [1-{len(novels)}] Select Novel | [B] Back")
         cmd = input("Choice: ").strip().lower()
 
         if cmd == 'n': page += 1
@@ -163,9 +163,9 @@ def show_rank_results(scraper, rank_id, rank_label, display_lang=None):
         elif cmd == 'b': break
         elif cmd == 'l':
             clear_screen()
-            print(f"--- Log Terbaru ({get_log_path()}) ---\n")
+            print(f"--- Recent Log ({get_log_path()}) ---\n")
             print(tail_log(40))
-            input("\nPress Enter untuk kembali...")
+            input("\nPress Enter to go back...")
         elif cmd.isdigit() and 1 <= int(cmd) <= len(novels):
             selected = novels[int(cmd)-1]
             init_project_menu(selected, scraper)
@@ -176,51 +176,51 @@ def init_project_menu(novel_data, scraper):
     print("=" * 50)
     print("  INITIALIZE NOVEL PROJECT")
     print("=" * 50)
-    print(f"  Judul  : {novel_data['title']}")
+    print(f"  Title  : {novel_data['title']}")
     print(f"  Author : {novel_data['author']}")
     print(f"  URL    : {novel_data['url']}")
     print("-" * 50)
 
     # Step 1: Fetch chapter list
-    print("[1/5] Mengambil daftar chapter...")
+    print("[1/5] Fetching chapter list...")
     details = scraper.get_novel_details(novel_data['url'])
     if not details or not details.get("chapters"):
-        print("[-] Gagal mengambil daftar chapter. Cek log untuk detail.")
-        input("\nPress Enter untuk kembali...")
+        print("[-] Failed to fetch chapter list. Check log for details.")
+        input("\nPress Enter to go back...")
         return
 
     chapter_count = details["chapter_count"]
     chapters = details["chapters"]
-    print(f"     Ditemukan {chapter_count} chapter.")
-    print(f"     Chapter pertama: {chapters[0]['title'] if chapters else '-'}")
+    print(f"     Found {chapter_count} chapters.")
+    print(f"     First chapter: {chapters[0]['title'] if chapters else '-'}")
     print("-" * 50)
 
-    confirm = input("Lanjutkan inisialisasi? (y/n): ").strip().lower()
+    confirm = input("Continue initialization? (y/n): ").strip().lower()
     if confirm != 'y':
         return
 
     # Merge info detail ke novel_data
     novel_data.update(details)
 
-    # Step 2: Buat folder project
-    print("\n[2/5] Membuat folder project...")
+    # Step 2: Create project folder
+    print("\n[2/5] Creating project folder...")
     nid = str(novel_data["id"]).replace("/", "_").strip("_")
     project_path = pm.create_project(novel_data)
     print(f"     Folder: {project_path}")
 
-    # Step 3: Download bab 1
-    print("\n[3/5] Mendownload bab 1...")
+    # Step 3: Download chapter 1
+    print("\n[3/5] Downloading chapter 1...")
     ch1 = chapters[0]
     raw_text = scraper.fetch_chapter(ch1["url"])
     if not raw_text:
-        print("[-] Gagal mendownload bab 1. Cek log untuk detail.")
-        input("\nPress Enter untuk kembali...")
+        print("[-] Failed to download chapter 1. Check log for details.")
+        input("\nPress Enter to go back...")
         return
     pm.save_chapter_raw(nid, 1, raw_text)
-    print(f"     Tersimpan ({len(raw_text)} karakter)")
+    print(f"     Saved ({len(raw_text)} chars)")
 
-    # Step 4: Gemini analisis entitas
-    print("\n[4/5] Analisis tokoh/lokasi/istilah dengan Gemini...")
+    # Step 4: Gemini entity analysis
+    print("\n[4/5] Analyzing characters/locations/terms with Gemini...")
     entities = tr.analyze_chapter(raw_text)
     reference = pm.load_reference(nid)
     reference = tr.merge_reference(reference, entities)
@@ -229,49 +229,49 @@ def init_project_menu(novel_data, scraper):
     chars = len(reference.get("characters", {}))
     locs = len(reference.get("locations", {}))
     terms = len(reference.get("terms", {}))
-    print(f"     Tokoh: {chars} | Lokasi: {locs} | Istilah: {terms}")
+    print(f"     Characters: {chars} | Locations: {locs} | Terms: {terms}")
     if chars + locs + terms == 0:
-        print("     [!] Tidak ada entitas terdeteksi — Gemini mungkin tidak terinstall.")
-        print("         Terjemahan tetap dilanjutkan tanpa referensi.")
+        print("     [!] No entities detected — Gemini may not be installed.")
+        print("         Translation will continue without reference.")
 
     # Tampilkan referensi singkat
     if chars > 0:
         sample = list(reference["characters"].items())[:5]
-        print("     Tokoh sample:", ", ".join(f"{k}→{v}" for k, v in sample))
+        print("     Characters sample:", ", ".join(f"{k}→{v}" for k, v in sample))
 
-    # Step 5: Translate bab 1
-    print("\n[5/5] Menterjemahkan bab 1 dengan Ollama...")
-    target = input("     Bahasa tujuan (ID: Indonesian, EN: English) [ID]: ").strip().lower()
+    # Step 5: Translate chapter 1
+    print("\n[5/5] Translating chapter 1 with Ollama...")
+    target = input("     Target language (ID: Indonesian, EN: English) [ID]: ").strip().lower()
     lang = "English" if target == "en" else "Indonesian"
 
     models = tr.get_available_models()
     if not models:
-        print("[-] Tidak ada model Ollama tersedia. Pastikan Ollama berjalan.")
-        input("\nPress Enter untuk kembali...")
+        print("[-] No Ollama models available. Make sure Ollama is running.")
+        input("\nPress Enter to go back...")
         return
 
-    print(f"     Model tersedia: {', '.join(models[:5])}")
-    print(f"     Menerjemahkan ke {lang}... (mungkin beberapa menit)")
+    print(f"     Available models: {', '.join(models[:5])}")
+    print(f"     Translating to {lang}... (may take a few minutes)")
 
     translated, used_model = tr.translate_chapter(raw_text, reference, lang, models)
     if not translated:
-        print("[-] Terjemahan gagal. Cek log di scraper_logs/ untuk detail.")
-        input("\nPress Enter untuk kembali...")
+        print("[-] Translation failed. Check log in scraper_logs/ for details.")
+        input("\nPress Enter to go back...")
         return
 
     pm.save_chapter_translated(nid, 1, translated)
-    print(f"     Selesai! Model: {used_model} | {len(translated)} karakter")
+    print(f"     Done! Model: {used_model} | {len(translated)} chars")
 
     # Tampilkan preview 5 baris pertama
     print("\n" + "=" * 50)
-    print("  PREVIEW TERJEMAHAN BAB 1")
+    print("  CHAPTER 1 TRANSLATION PREVIEW")
     print("=" * 50)
     preview = "\n".join(translated.splitlines()[:10])
     print(preview)
     print("\n...")
-    print(f"\n[OK] Project tersimpan di: {project_path}")
-    print(f"     Log detail: {get_log_path()}")
-    input("\nPress Enter untuk kembali...")
+    print(f"\n[OK] Project saved at: {project_path}")
+    print(f"     Log: {get_log_path()}")
+    input("\nPress Enter to go back...")
 
 
 def init_project_from_url(manager):
@@ -288,7 +288,7 @@ def init_project_from_url(manager):
     print("[*] Fetching novel data...")
     details = scraper.get_novel_details(url)
     if not details:
-        print("[-] Gagal mengambil data novel.")
+        print("[-] Failed to fetch novel data.")
         input("Press Enter...")
         return
 
@@ -302,7 +302,7 @@ def init_project_from_url(manager):
 def _paste_multiline(prompt_text):
     """Baca input multiline. Ketik '---' di baris baru untuk selesai."""
     print(prompt_text)
-    print("(Paste teks, lalu ketik '---' di baris baru dan tekan Enter)")
+    print("(Paste text, then type '---' on a new line and press Enter)")
     lines = []
     while True:
         try:
@@ -370,7 +370,7 @@ def manual_project_new():
         f"You are helping name a novel translation project folder.\n"
         f"Original title: {title}\n"
         f"Source language: {source_lang}\n"
-        f"Synopsis: {synopsis or '(tidak tersedia)'}\n\n"
+        f"Synopsis: {synopsis or '(not available)'}\n\n"
         f"Generate 5 short English folder name suggestions for this novel project.\n"
         f"Rules:\n"
         f"- ASCII only, no spaces (use underscores), max 30 chars each\n"
@@ -444,7 +444,7 @@ def manual_project_new():
         print(f"\n  Copy chapter files (.txt) to:")
         print(f"  {raw_path}")
         print(f"\n  One file = one chapter. Any filename works, e.g.:")
-        print(f"    chapter_001.txt, ch01.txt, bab_1.txt, etc.")
+        print(f"    chapter_001.txt, ch01.txt, ch_001.txt, etc.")
     else:
         print(f"\n  Empty chapter files are ready at:")
         print(f"  {raw_path}")
@@ -499,7 +499,7 @@ def _parse_chapter_selection(text, max_n):
       "1-5"     → [1, 2, 3, 4, 5]
       "1,3,5"   → [1, 3, 5]
       "1-3,7,9" → [1, 2, 3, 7, 9]
-    Kembalikan list int yang sudah deduplicated dan terurut, atau [] jika invalid.
+    Returns sorted deduplicated list of ints, or [] if invalid.
     """
     result = set()
     parts = text.replace(" ", "").split(",")
@@ -538,7 +538,7 @@ def manual_project_menu(project_id):
             print(f"  ({title_orig})")
         else:
             print(f"  {title_orig}")
-        print(f"  {src} → {tgt}  |  Ref: {chars} tokoh, {locs} lokasi, {terms} istilah")
+        print(f"  {src} → {tgt}  |  Ref: {chars} chars, {locs} locations, {terms} terms")
         print("=" * 56)
 
         chapters = pm.list_raw_chapters(project_id)
@@ -633,7 +633,7 @@ def manual_project_menu(project_id):
             new_val = not current
             pm.update_manual_metadata(project_id, {"pinyin_annotations": new_val})
             state = "ON" if new_val else "OFF"
-            print(f"[OK] Pinyin annotations: {state}. {'Anotasi pinyin akan muncul di first occurrence.' if new_val else 'Tidak ada anotasi pinyin/romanized — semua terjemah langsung ke target language.'}")
+            print(f"[OK] Pinyin annotations: {state}. {'Pinyin annotations will appear on first occurrence.' if new_val else 'No pinyin/romanized annotations — all terms translated directly into target language.'}")
             input("Press Enter...")
         elif cmd == 'g':
             generate_alt_titles(project_id)
@@ -658,7 +658,7 @@ def add_raw_chapter_from_url(project_id):
     from engines.scraper_manager import ScraperManager
     sm = ScraperManager()
 
-    print("\n[Add Raw Chapter from URL]  (Enter kosong = kembali ke menu)")
+    print("\n[Add Raw Chapter from URL]  (Enter empty to go back)")
     while True:
         url = input("\nChapter URL: ").strip()
         if not url:
@@ -879,7 +879,7 @@ def manual_research_project(project_id):
 
     content_parts = []
     if synopsis:
-        content_parts.append(f"[SINOPSIS]\n{synopsis}")
+        content_parts.append(f"[SYNOPSIS]\n{synopsis}")
 
     MAX_PER_CHAPTER = 4000
     for fname in selected:
@@ -1075,12 +1075,12 @@ def manual_research_project(project_id):
     os.makedirs(report_dir, exist_ok=True)
     report_file = os.path.join(report_dir, "project_research.txt")
     with open(report_file, "w", encoding="utf-8") as f:
-        f.write(f"LAPORAN RISET PROJECT\nNovel: {title} | {src_lang} → {tgt_lang}\n")
-        f.write(f"Chapter dianalisis: {', '.join(selected) or '(sinopsis saja)'}\n")
+        f.write(f"PROJECT RESEARCH REPORT\nNovel: {title} | {src_lang} → {tgt_lang}\n")
+        f.write(f"Analyzed chapters: {', '.join(selected) or '(synopsis only)'}\n")
         f.write("=" * 56 + "\n\n")
-        f.write("=== LAPORAN ===\n\n")
+        f.write("=== REPORT ===\n\n")
         f.write(report_text)
-        f.write("\n\n=== PANDUAN TERJEMAHAN ===\n\n")
+        f.write("\n\n=== TRANSLATION GUIDE ===\n\n")
         f.write(guide_text)
 
     # Tampilkan ringkasan
@@ -1120,22 +1120,22 @@ def _translate_metadata(project_id):
     tgt_lang = meta.get("target_lang", "Indonesian")
 
     if not title and not synopsis:
-        print("[-] Tidak ada judul/sinopsis untuk diterjemahkan.")
+        print("[-] No title/synopsis to translate.")
         input("Press Enter...")
         return
 
-    print(f"[*] Gemini menerjemahkan judul & sinopsis ke {tgt_lang}...")
+    print(f"[*] Gemini is translating title & synopsis to {tgt_lang}...")
     prompt = (
         f"Translate the following novel title and synopsis into {tgt_lang}.\n"
         f"Return ONLY valid JSON with keys 'title' and 'synopsis'. No markdown, no explanation.\n\n"
         f"Title: {title}\n"
-        f"Synopsis: {synopsis or '(kosong)'}\n\n"
+        f"Synopsis: {synopsis or '(empty)'}\n\n"
         f"Output format:\n"
         f'{{ "title": "...", "synopsis": "..." }}'
     )
     out = tr._run_gemini(prompt, timeout=90)
     if not out:
-        print("[-] Gemini tidak merespons.")
+        print("[-] Gemini did not respond.")
         input("Press Enter...")
         return
 
@@ -1215,11 +1215,11 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
         import engines.nllb as _nllb
         nllb_info = _nllb.get_model_info() if _nllb.is_available() else "NOT INSTALLED"
         print("Translation engine:")
-        print("  1. Gemini + Ollama           (Gemini: guide/analysis only — Ollama: all translation, hemat)")
+        print("  1. Gemini + Ollama           (Gemini: guide/analysis only — Ollama: all translation, efficient)")
         print("  2. Ollama only               (local, offline, no Gemini at all)")
-        print("  3. Gemini primary + Ollama backup  (Gemini tiap chunk, Ollama backup jika Gemini gagal)")
-        print("  4. Gemini + gemma3           (Gemini: guide/analysis only — gemma3: semua terjemahan)")
-        print("  5. Gemini + translategemma   (Gemini: guide/analysis only — translategemma: semua terjemahan)")
+        print("  3. Gemini primary + Ollama backup  (Gemini each chunk, Ollama fallback if Gemini fails)")
+        print("  4. Gemini + gemma3           (Gemini: guide/analysis only — gemma3: all translation)")
+        print("  5. Gemini + translategemma   (Gemini: guide/analysis only — translategemma: all translation)")
         print(f"  --- [EXPERIMENT] NLLB pivot: {nllb_info} | ⚠ Not recommended for CJK (CN/JP/KR) ---")
         print("  6. NLLB + Gemini             (pivot CN→EN, Gemini refine EN→ID — CJK: info loss risk)")
         print("  7. NLLB + translategemma     (pivot CN→EN, translategemma refine  — CJK: info loss risk)")
@@ -1389,7 +1389,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             pinyin_annotations=pinyin_annotations,
         )
     else:
-        # gemini_fallback: Gemini hanya untuk analisis/guide — Ollama menerjemahkan semua chunk
+        # gemini_fallback: Gemini for analysis/guide only — Ollama translates all chunks
         translated, stats = tr.translate_with_ollama_only(
             raw_text, ref, target,
             ollama_models=models,
@@ -1401,7 +1401,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             temp_dir=_temp_dir,
             pinyin_annotations=pinyin_annotations,
         )
-    print()  # newline setelah progress bar
+    print()  # newline after progress bar
 
     if not translated:
         print(f"\n[-] {filename}: Translation failed entirely.")
@@ -1450,7 +1450,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
                     chunk_size=2000, progress_cb=_progress, guide_text=guide_text, is_explicit=True, temp_dir=_temp_dir,
                 )
             else:
-                # gemini_fallback: Ollama menerjemahkan, Gemini hanya guide
+                # gemini_fallback: Ollama translates, Gemini for guide only
                 translated, stats = tr.translate_with_ollama_only(
                     raw_text, ref, target, ollama_models=explicit_models,
                     chunk_size=2000, progress_cb=_progress, guide_text=guide_text,
@@ -1539,11 +1539,11 @@ def batch_translate_chapters(project_id, chapter_list):
     import engines.nllb as _nllb
     nllb_info = _nllb.get_model_info() if _nllb.is_available() else "NOT INSTALLED"
     print("Translation engine (applies to ALL chapters):")
-    print("  1. Gemini + Ollama           (Gemini: guide/analysis only — Ollama: all translation, hemat)")
+    print("  1. Gemini + Ollama           (Gemini: guide/analysis only — Ollama: all translation, efficient)")
     print("  2. Ollama only               (local, offline, no Gemini at all)")
-    print("  3. Gemini primary + Ollama backup  (Gemini tiap chunk, Ollama backup jika Gemini gagal)")
-    print("  4. Gemini + gemma3           (Gemini: guide/analysis only — gemma3: semua terjemahan)")
-    print("  5. Gemini + translategemma   (Gemini: guide/analysis only — translategemma: semua terjemahan)")
+    print("  3. Gemini primary + Ollama backup  (Gemini each chunk, Ollama fallback if Gemini fails)")
+    print("  4. Gemini + gemma3           (Gemini: guide/analysis only — gemma3: all translation)")
+    print("  5. Gemini + translategemma   (Gemini: guide/analysis only — translategemma: all translation)")
     print(f"  --- [EXPERIMENT] NLLB pivot: {nllb_info} | ⚠ Not recommended for CJK (CN/JP/KR) ---")
     print("  6. NLLB + Gemini             (pivot CN→EN, Gemini refine EN→ID — CJK: info loss risk)")
     print("  7. NLLB + translategemma     (pivot CN→EN, translategemma refine  — CJK: info loss risk)")
@@ -1603,12 +1603,12 @@ def _quality_scan(translated_text, reference, filename):
     unique_cjk = list(set(cjk))
     if unique_cjk:
         snippets = ", ".join(f'"{c}"' for c in unique_cjk[:8])
-        print(f"\n  [QC] ⚠ {len(unique_cjk)} CJK term(s) masih tersisa: {snippets}")
+        print(f"\n  [QC] ⚠ {len(unique_cjk)} CJK term(s) remaining: {snippets}")
         if len(unique_cjk) > 8:
-            print(f"       ...dan {len(unique_cjk)-8} lainnya")
-        print(f"       Pertimbangkan retranslate atau gunakan [Y] Sync Reference.")
+            print(f"       ...and {len(unique_cjk)-8} more")
+        print(f"       Consider retranslating or use [Y] Sync Reference.")
     else:
-        print(f"\n  [QC] ✓ Tidak ada karakter CJK tersisa.")
+        print(f"\n  [QC] ✓ No CJK characters remaining.")
 
 
 def retranslate_chapter(project_id):
@@ -1623,17 +1623,17 @@ def retranslate_chapter(project_id):
     print("=" * 56)
     print("  RE-TRANSLATE CHAPTER")
     print("=" * 56)
-    print("  Format pilihan: angka tunggal, range (1-5), list (1,3,5), atau kombinasi (1-3,7)\n")
+    print("  Format: single number, range (1-5), list (1,3,5), or combination (1-3,7)\n")
     for i, fname in enumerate(translated, 1):
         print(f"  {i:3}. {fname}")
     print()
-    choice = input(f"Pilihan [1-{len(translated)}] atau [B] Back: ").strip().lower()
+    choice = input(f"Selection [1-{len(translated)}] or [B] Back: ").strip().lower()
     if choice == 'b' or not choice:
         return
 
     selected = _parse_chapter_selection(choice, len(translated))
     if not selected:
-        print("[-] Pilihan tidak valid.")
+        print("[-] Invalid selection.")
         input("Press Enter...")
         return
 
@@ -1642,12 +1642,12 @@ def retranslate_chapter(project_id):
     # Cek semua raw tersedia
     missing = [f for f in chapter_list if not pm.load_raw_chapter(project_id, f)]
     if missing:
-        print(f"[-] Raw file tidak ditemukan untuk: {', '.join(missing)}")
+        print(f"[-] Raw file not found for: {', '.join(missing)}")
         input("Press Enter...")
         return
 
     # Konfirmasi
-    print(f"\n  Akan di-retranslate ({len(chapter_list)} chapter):")
+    print(f"\n  Will be re-translated ({len(chapter_list)} chapters):")
     for f in chapter_list:
         print(f"    - {f}")
     confirm = input("\n  Overwrite existing translation? [y/N]: ").strip().lower()
@@ -1661,7 +1661,7 @@ def retranslate_chapter(project_id):
         # Batch — pilih engine sekali, translate semua
         import engines.nllb as _nllb
         nllb_info = _nllb.get_model_info() if _nllb.is_available() else "NOT INSTALLED"
-        print("\nTranslation engine untuk semua chapter:")
+        print("\nTranslation engine for all chapters:")
         print("  1. Gemini + Ollama fallback")
         print("  2. Ollama only")
         print("  3. Gemini primary + Ollama backup")
@@ -1686,7 +1686,7 @@ def retranslate_chapter(project_id):
             else:
                 fail += 1
         print(f"\n{'='*56}")
-        print(f"[DONE] Batch retranslate selesai: {ok} OK, {fail} gagal.")
+        print(f"[DONE] Batch retranslate complete: {ok} OK, {fail} failed.")
         input("Press Enter...")
 
 
@@ -1980,9 +1980,9 @@ def sync_reference(project_id):
     snap_path = os.path.join(pm.MANUAL_DIR, project_id, "reference_snapshot.json")
 
     if not os.path.exists(snap_path):
-        print("\n[-] Snapshot tidak ditemukan. Membuat snapshot sekarang...")
+        print("\n[-] Snapshot not found. Creating snapshot now...")
         _save_reference_snapshot(project_id)
-        print("  [OK] Snapshot dibuat. Edit reference.json lalu jalankan Sync lagi.")
+        print("  [OK] Snapshot created. Edit reference.json then run Sync again.")
         input("Press Enter...")
         return
 
@@ -2033,8 +2033,8 @@ def sync_reference(project_id):
                 _add(old_r, new_r)
 
     if not replace_map:
-        print("\n  [OK] Tidak ada perubahan terdeteksi antara reference dan snapshot.")
-        print("  (Edit reference.json terlebih dahulu, lalu jalankan Sync)")
+        print("\n  [OK] No changes detected between reference and snapshot.")
+        print("  (Edit reference.json first, then run Sync)")
         input("Press Enter...")
         return
 
@@ -2044,12 +2044,12 @@ def sync_reference(project_id):
 
     translated = pm.list_translated_chapters(project_id)
     if not translated:
-        print("\n[-] Tidak ada translated chapter.")
+        print("\n[-] No translated chapters found.")
         input("Press Enter...")
         return
 
     # ── Scan occurrences ──────────────────────────────────────────────────────
-    print("  Mencari occurrence di translated chapters...\n")
+    print("  Scanning translated chapters for occurrences...\n")
     preview = {}  # {filename: {old: [line_numbers]}}
     for fname in translated:
         text = pm.load_translated_chapter(project_id, fname)
@@ -2062,36 +2062,36 @@ def sync_reference(project_id):
 
     # ── Tampilkan laporan lengkap ─────────────────────────────────────────────
     print("=" * 56)
-    print("  LAPORAN PERUBAHAN")
+    print("  CHANGE REPORT")
     print("=" * 56)
-    print(f"\n  Perubahan di reference ({len(replace_map)} item):")
+    print(f"\n  Changes in reference ({len(replace_map)} items):")
     for old, new in replace_map.items():
         total_occ = sum(len(v.get(old,[])) for v in preview.values())
-        found_str = f"{total_occ} occurrence di {sum(1 for v in preview.values() if old in v)} chapter(s)" if total_occ else "tidak ditemukan di chapters"
+        found_str = f"{total_occ} occurrence(s) in {sum(1 for v in preview.values() if old in v)} chapter(s)" if total_occ else "not found in chapters"
         print(f"    '{old}'  →  '{new}'  [{found_str}]")
 
     if preview:
-        print(f"\n  Detail lokasi:")
+        print(f"\n  Location details:")
         for fname in sorted(preview):
             for old, linenos in preview[fname].items():
                 lines_str = ", ".join(str(n) for n in linenos[:10])
                 if len(linenos) > 10:
                     lines_str += f"... (+{len(linenos)-10})"
-                print(f"    {fname} baris {lines_str}  →  '{old}'")
+                print(f"    {fname} line(s) {lines_str}  →  '{old}'")
     else:
-        print("\n  [INFO] Tidak ada occurrence ditemukan di translated chapters.")
+        print("\n  [INFO] No occurrences found in translated chapters.")
 
     print()
-    confirm = input("  Lanjutkan sync? [y/N]: ").strip().lower()
+    confirm = input("  Continue sync? [y/N]: ").strip().lower()
     if confirm != 'y':
-        print("  Dibatalkan. Snapshot tidak diupdate.")
+        print("  Cancelled. Snapshot not updated.")
         input("Press Enter...")
         return
 
     if not preview:
-        # Tidak ada yang perlu direplace, tapi user konfirmasi → update snapshot
+        # Nothing to replace but user confirmed → update snapshot
         _save_reference_snapshot(project_id)
-        print("  Snapshot diupdate (tidak ada chapter yang berubah).")
+        print("  Snapshot updated (no chapters changed).")
         input("Press Enter...")
         return
 
@@ -2101,13 +2101,13 @@ def sync_reference(project_id):
     log_lines = [
         f"SYNC REFERENCE LOG",
         f"Project  : {project_id}",
-        f"Waktu    : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Time     : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"=" * 56,
-        f"Perubahan reference:",
+        f"Reference changes:",
     ]
     for old, new in replace_map.items():
         log_lines.append(f"  '{old}'  →  '{new}'")
-    log_lines.append(f"\nHasil replace:")
+    log_lines.append(f"\nReplacements:")
 
     total_replaced = 0
     for fname in sorted(preview):
@@ -2137,8 +2137,8 @@ def sync_reference(project_id):
     _save_reference_snapshot(project_id)
 
     print(f"\n  [OK] {total_replaced} replacement(s) di {len(preview)} chapter(s).")
-    print(f"  Log disimpan: sync_log.txt")
-    print("  Snapshot diupdate.")
+    print(f"  Log saved: sync_log.txt")
+    print("  Snapshot updated.")
     input("Press Enter...")
 
 
@@ -2170,10 +2170,10 @@ def generate_alt_titles(project_id):
         f"Original title: {title}\n"
         f"English name: {eng_name}\n"
         f"Target language: {tgt_lang}\n"
-        f"Synopsis: {synopsis or '(tidak tersedia)'}\n"
-        f"Main characters: {chars_sample or '(tidak tersedia)'}\n"
-        f"Key terms/world: {terms_sample or '(tidak tersedia)'}\n"
-        f"Story tone/style: {report_snippet or '(tidak tersedia)'}\n\n"
+        f"Synopsis: {synopsis or '(not available)'}\n"
+        f"Main characters: {chars_sample or '(not available)'}\n"
+        f"Key terms/world: {terms_sample or '(not available)'}\n"
+        f"Story tone/style: {report_snippet or '(not available)'}\n\n"
         f"Generate 10 alternative titles in {tgt_lang} for uploading to web novel platforms (like Fizzo).\n"
         f"Rules:\n"
         f"- Catchy, clickbait-friendly but not misleading\n"
@@ -2284,10 +2284,10 @@ def generate_image_prompt(project_id):
     prompt = (
         f"You are an expert AI image prompt engineer for novel cover art.\n\n"
         f"Novel: {title} ({src_lang} web novel)\n"
-        f"Synopsis: {synopsis or '(tidak tersedia)'}\n"
-        f"Main characters:\n{chars_detail or '  (tidak tersedia)'}\n"
-        f"Key locations: {locs_detail or '(tidak tersedia)'}\n"
-        f"Story tone: {guide_tone or '(tidak tersedia)'}\n\n"
+        f"Synopsis: {synopsis or '(not available)'}\n"
+        f"Main characters:\n{chars_detail or '  (not available)'}\n"
+        f"Key locations: {locs_detail or '(not available)'}\n"
+        f"Story tone: {guide_tone or '(not available)'}\n\n"
         f"Generate cover art prompts optimized for **{platform}**.\n"
         f"Platform guidance: {hint}\n\n"
         f"Provide:\n"
@@ -2300,7 +2300,7 @@ def generate_image_prompt(project_id):
         f"2. **NEGATIVE PROMPT** (things to avoid — skip if platform doesn't use negative prompts)\n\n"
         f"3. **ALTERNATIVE CONCEPT** — A second composition idea (different pose/scene)\n\n"
         f"4. **STYLE TAGS** — 5-8 concise style keywords for quick iteration\n\n"
-        f"Write prompts in English (standard for image AI). Explain design choices briefly in Indonesian."
+        f"Write prompts in English (standard for image AI). Briefly explain design choices."
     )
 
     result = tr._run_gemini(prompt, timeout=120)
