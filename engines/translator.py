@@ -211,14 +211,19 @@ def _run_ollama(model, prompt, timeout=120):
 
 
 def _build_annotation_rule(target_lang, pinyin_annotations=True):
-    """Build annotation rule block. pinyin_annotations=False → output target lang only, no romanized forms."""
+    """Build annotation rule block.
+    pinyin_annotations=False → skip 'Romanized (Meaning)' format for cultural/cultivation terms;
+    proper nouns already in REFERENCE are unaffected (reference block handles those).
+    """
     if not pinyin_annotations:
         return (
             f"ANNOTATION RULE:\n"
-            f"- Output {target_lang} ONLY. Do NOT include Chinese/Japanese/Korean characters, pinyin, romaji, or any romanized forms.\n"
-            f"- Translate ALL terms to {target_lang} meaning only — never use 'Romanized (Meaning)' format.\n"
-            f"  e.g. 剑气→'Energi Pedang', 丹田→'Pusat Energi' — NEVER write 'Jianqi (Energi Pedang)'.\n"
-            f"- Slang/idioms: use natural {target_lang} equivalent.\n"
+            f"1. Proper nouns listed in REFERENCE (characters, locations, terms): use EXACTLY as shown in REFERENCE — do not change.\n"
+            f"2. For cultural concepts, cultivation terms, or proper nouns NOT in REFERENCE:\n"
+            f"   Translate meaning directly into {target_lang} — do NOT use 'Romanized (Meaning)' format.\n"
+            f"   e.g. 剑气→'Energi Pedang', 丹田→'Pusat Energi' — NEVER write 'Jianqi (Energi Pedang)'.\n"
+            f"3. Do NOT add pinyin or romanized prefix for terms that have a clear {target_lang} meaning.\n"
+            f"4. Chinese slang/idioms: use natural {target_lang} equivalent directly.\n"
         )
     return (
         f"ANNOTATION RULE for locations & terms:\n"
