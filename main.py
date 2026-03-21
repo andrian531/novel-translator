@@ -1455,6 +1455,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
 
     # Update name index (for continuity check)
     _update_name_index(project_id, filename, translated, ref.get("character_profiles", []))
+    _save_translation_log(project_id, filename, engine_mode, engine_label)
 
     # Step 4: Generate rolling summary & update chapter_context.json
     novel_title = meta.get("title", project_id)
@@ -1617,6 +1618,30 @@ def retranslate_chapter(project_id):
         return
 
     manual_translate_chapter(project_id, filename)
+
+
+def _save_translation_log(project_id, filename, engine_mode, engine_label):
+    """Catat engine yang dipakai untuk setiap chapter ke translation_log.json."""
+    import json
+    from datetime import datetime
+    log_path = os.path.join(pm.MANUAL_DIR, project_id, "translation_log.json")
+    try:
+        log = json.load(open(log_path, encoding='utf-8')) if os.path.exists(log_path) else {}
+    except Exception:
+        log = {}
+    entry = {
+        "engine": engine_mode,
+        "engine_label": engine_label,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    # Catat model NLLB jika pakai NLLB
+    if engine_mode.startswith("nllb"):
+        nllb_marker = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".nllb")
+        if os.path.exists(nllb_marker):
+            entry["nllb_model"] = open(nllb_marker).read().strip()
+    log[filename] = entry
+    with open(log_path, 'w', encoding='utf-8') as f:
+        json.dump(log, f, ensure_ascii=False, indent=2)
 
 
 def _update_name_index(project_id, filename, translated_text, profiles):
