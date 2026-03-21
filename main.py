@@ -1211,10 +1211,10 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
         print("  3. Gemini primary + Ollama backup  (Gemini tiap chunk, Ollama backup jika Gemini gagal)")
         print("  4. Gemini + gemma3           (Gemini: guide/analysis only — gemma3: semua terjemahan)")
         print("  5. Gemini + translategemma   (Gemini: guide/analysis only — translategemma: semua terjemahan)")
-        print(f"  --- [EXPERIMENT] NLLB: {nllb_info} ---")
-        print("  6. NLLB + Gemini             (NLLB: CN→EN pivot — Gemini: EN→ID refine, Ollama fallback)")
-        print("  7. NLLB + translategemma     (NLLB: CN→EN pivot — translategemma: EN→ID, Gemini guide)")
-        print("  8. NLLB + gemma3             (NLLB: CN→EN pivot — gemma3: EN→ID, Gemini guide)")
+        print(f"  --- [EXPERIMENT] NLLB pivot: {nllb_info} | ⚠ Not recommended for CJK (CN/JP/KR) ---")
+        print("  6. NLLB + Gemini             (pivot CN→EN, Gemini refine EN→ID — CJK: info loss risk)")
+        print("  7. NLLB + translategemma     (pivot CN→EN, translategemma refine  — CJK: info loss risk)")
+        print("  8. NLLB + gemma3             (pivot CN→EN, gemma3 refine          — CJK: info loss risk)")
         eng_c = input("Choice [1]: ").strip()
         if eng_c == "2":
             engine_mode = "ollama"
@@ -1528,10 +1528,10 @@ def batch_translate_chapters(project_id, chapter_list):
     print("  3. Gemini primary + Ollama backup  (Gemini tiap chunk, Ollama backup jika Gemini gagal)")
     print("  4. Gemini + gemma3           (Gemini: guide/analysis only — gemma3: semua terjemahan)")
     print("  5. Gemini + translategemma   (Gemini: guide/analysis only — translategemma: semua terjemahan)")
-    print(f"  --- [EXPERIMENT] NLLB: {nllb_info} ---")
-    print("  6. NLLB + Gemini             (NLLB: CN→EN pivot — Gemini: EN→ID refine, Ollama fallback)")
-    print("  7. NLLB + translategemma     (NLLB: CN→EN pivot — translategemma: EN→ID, Gemini guide)")
-    print("  8. NLLB + gemma3             (NLLB: CN→EN pivot — gemma3: EN→ID, Gemini guide)")
+    print(f"  --- [EXPERIMENT] NLLB pivot: {nllb_info} | ⚠ Not recommended for CJK (CN/JP/KR) ---")
+    print("  6. NLLB + Gemini             (pivot CN→EN, Gemini refine EN→ID — CJK: info loss risk)")
+    print("  7. NLLB + translategemma     (pivot CN→EN, translategemma refine  — CJK: info loss risk)")
+    print("  8. NLLB + gemma3             (pivot CN→EN, gemma3 refine          — CJK: info loss risk)")
     eng_c = input("Choice [1]: ").strip()
     if eng_c == "2":
         engine_mode = "ollama"
