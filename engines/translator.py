@@ -239,6 +239,26 @@ def _build_annotation_rule(target_lang, pinyin_annotations=True):
     )
 
 
+def _strip_pinyin(value):
+    """Extract meaning from 'Romanized (Meaning)' format. Returns value unchanged if not in that format.
+    e.g. 'Gondola Dongjing (Gondola Timur)' → 'Gondola Timur'
+         'Collar' → 'Collar' (unchanged)
+    """
+    import re as _re
+    m = _re.search(r'\(([^)]+)\)\s*$', value.strip())
+    return m.group(1).strip() if m else value
+
+
+def _apply_pinyin_strip(reference):
+    """Return a copy of reference with pinyin stripped from locations and terms values."""
+    import copy
+    ref = copy.deepcopy(reference)
+    for section in ("locations", "terms"):
+        if ref.get(section):
+            ref[section] = {k: _strip_pinyin(v) for k, v in ref[section].items()}
+    return ref
+
+
 def _build_term_enforcement(reference):
     """Build a concise mandatory term block placed near end of prompt for maximum salience."""
     terms = reference.get("terms", {})
@@ -630,6 +650,8 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
         logger.error("[Translate/Ollama] Tidak ada model tersedia.")
         return None, None
 
+    if not pinyin_annotations:
+        reference = _apply_pinyin_strip(reference)
     ref_lines = []
     if reference.get("characters"):
         names = ", ".join(f"{k}={v}" for k, v in reference["characters"].items())
@@ -787,6 +809,8 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
         ollama_models = get_available_models(source_lang)
 
     # Bangun blok referensi sekali untuk semua chunk
+    if not pinyin_annotations:
+        reference = _apply_pinyin_strip(reference)
     ref_lines = []
     if reference.get("characters"):
         names = ", ".join(f"{k}={v}" for k, v in reference["characters"].items())
@@ -1189,6 +1213,8 @@ def translate_with_nllb_pivot(raw_text, reference, target_lang,
     print(f"\n  [NLLB] Step 2/2: Refining {intermediate_lang} → {target_lang} with context...", flush=True)
 
     # Build reference block
+    if not pinyin_annotations:
+        reference = _apply_pinyin_strip(reference)
     ref_lines = []
     if reference.get("characters"):
         names = ", ".join(f"{k}={v}" for k, v in reference["characters"].items())
