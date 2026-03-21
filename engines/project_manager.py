@@ -333,9 +333,12 @@ def load_chapter_context(project_id):
 
 
 def save_chapter_context(project_id, context):
-    """Simpan chapter_context.json. Jaga rolling summaries max 5 entry."""
-    # Pastikan summaries tidak lebih dari 5
+    """Simpan chapter_context.json. Jaga rolling summaries max 5 entry, tiap summary max 350 char."""
     summaries = context.get("chapter_summaries", [])
+    # Truncate individual summary text to prevent prompt bloat
+    for s in summaries:
+        if len(s.get("summary", "")) > 350:
+            s["summary"] = s["summary"][:347] + "..."
     if len(summaries) > 5:
         context["chapter_summaries"] = summaries[-5:]
     f = os.path.join(_manual_dir(project_id), "chapter_context.json")

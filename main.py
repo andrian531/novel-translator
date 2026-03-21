@@ -1471,6 +1471,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
     # Update name index (for continuity check)
     _update_name_index(project_id, filename, translated, ref.get("character_profiles", []))
     _save_translation_log(project_id, filename, engine_mode, engine_label)
+    _quality_scan(translated, ref, filename)
 
     # Step 4: Generate rolling summary & update chapter_context.json
     novel_title = meta.get("title", project_id)
@@ -1595,8 +1596,23 @@ def batch_translate_chapters(project_id, chapter_list):
 
 
 
+def _quality_scan(translated_text, reference, filename):
+    """Scan hasil terjemahan: CJK tersisa + spot-check reference terms."""
+    import re
+    cjk = re.findall(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+', translated_text)
+    unique_cjk = list(set(cjk))
+    if unique_cjk:
+        snippets = ", ".join(f'"{c}"' for c in unique_cjk[:8])
+        print(f"\n  [QC] ⚠ {len(unique_cjk)} CJK term(s) masih tersisa: {snippets}")
+        if len(unique_cjk) > 8:
+            print(f"       ...dan {len(unique_cjk)-8} lainnya")
+        print(f"       Pertimbangkan retranslate atau gunakan [Y] Sync Reference.")
+    else:
+        print(f"\n  [QC] ✓ Tidak ada karakter CJK tersisa.")
+
+
 def retranslate_chapter(project_id):
-    """Re-translate satu chapter yang sudah ditranslate — overwrite dengan reference terbaru."""
+    """Re-translate chapter — single atau batch, overwrite dengan reference terbaru."""
     clear_screen()
     translated = pm.list_translated_chapters(project_id)
     if not translated:
@@ -1607,32 +1623,71 @@ def retranslate_chapter(project_id):
     print("=" * 56)
     print("  RE-TRANSLATE CHAPTER")
     print("=" * 56)
-    print("  Select a chapter to re-translate (overwrites existing):\n")
+    print("  Format pilihan: angka tunggal, range (1-5), list (1,3,5), atau kombinasi (1-3,7)\n")
     for i, fname in enumerate(translated, 1):
         print(f"  {i:3}. {fname}")
     print()
-    choice = input(f"Chapter number [1-{len(translated)}] or [B] Back: ").strip().lower()
+    choice = input(f"Pilihan [1-{len(translated)}] atau [B] Back: ").strip().lower()
     if choice == 'b' or not choice:
         return
-    if not choice.isdigit() or not (1 <= int(choice) <= len(translated)):
-        print("[-] Invalid selection.")
+
+    selected = _parse_chapter_selection(choice, len(translated))
+    if not selected:
+        print("[-] Pilihan tidak valid.")
         input("Press Enter...")
         return
 
-    filename = translated[int(choice) - 1]
-    raw_text = pm.load_raw_chapter(project_id, filename)
-    if not raw_text:
-        print(f"[-] Raw file '{filename}' not found or empty — cannot re-translate.")
+    chapter_list = [translated[i - 1] for i in selected]
+
+    # Cek semua raw tersedia
+    missing = [f for f in chapter_list if not pm.load_raw_chapter(project_id, f)]
+    if missing:
+        print(f"[-] Raw file tidak ditemukan untuk: {', '.join(missing)}")
         input("Press Enter...")
         return
 
-    print(f"\n  Chapter : {filename}")
-    print(f"  Raw size: {len(raw_text)} chars")
+    # Konfirmasi
+    print(f"\n  Akan di-retranslate ({len(chapter_list)} chapter):")
+    for f in chapter_list:
+        print(f"    - {f}")
     confirm = input("\n  Overwrite existing translation? [y/N]: ").strip().lower()
     if confirm != 'y':
         return
 
-    manual_translate_chapter(project_id, filename)
+    if len(chapter_list) == 1:
+        # Single — pakai flow interaktif biasa (user pilih engine sendiri)
+        manual_translate_chapter(project_id, chapter_list[0])
+    else:
+        # Batch — pilih engine sekali, translate semua
+        import engines.nllb as _nllb
+        nllb_info = _nllb.get_model_info() if _nllb.is_available() else "NOT INSTALLED"
+        print("\nTranslation engine untuk semua chapter:")
+        print("  1. Gemini + Ollama fallback")
+        print("  2. Ollama only")
+        print("  3. Gemini primary + Ollama backup")
+        print("  4. Gemini + gemma3")
+        print("  5. Gemini + translategemma")
+        print(f"  --- [EXPERIMENT] NLLB: {nllb_info} | ⚠ Not recommended for CJK ---")
+        print("  6. NLLB + Gemini  7. NLLB + translategemma  8. NLLB + gemma3")
+        eng_c = input("Choice [1]: ").strip()
+        mode_map = {"2": "ollama", "3": "gemini_only", "4": "gemini_gemma3",
+                    "5": "gemini_translategemma", "6": "nllb_gemini",
+                    "7": "nllb_translategemma", "8": "nllb_gemma3"}
+        engine_mode = mode_map.get(eng_c, "gemini_fallback")
+
+        print(f"\n[*] Batch retranslate: {len(chapter_list)} chapters | engine={engine_mode}\n")
+        ok, fail = 0, 0
+        for fname in chapter_list:
+            result = manual_translate_chapter(project_id, fname,
+                                              engine_mode=engine_mode,
+                                              batch_mode=True)
+            if result:
+                ok += 1
+            else:
+                fail += 1
+        print(f"\n{'='*56}")
+        print(f"[DONE] Batch retranslate selesai: {ok} OK, {fail} gagal.")
+        input("Press Enter...")
 
 
 def _save_translation_log(project_id, filename, engine_mode, engine_label):
