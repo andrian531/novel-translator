@@ -1976,6 +1976,12 @@ def sync_reference(project_id):
     print("  SYNC REFERENCE → TRANSLATED CHAPTERS")
     print("=" * 56)
 
+    meta = pm.load_manual_metadata(project_id)
+    pinyin_on = meta.get("pinyin_annotations", True)
+    if not pinyin_on:
+        print("  [~] Pinyin annotations: OFF — locations/terms values will be stripped before sync")
+        print()
+
     ref_path  = os.path.join(pm.MANUAL_DIR, project_id, "reference.json")
     snap_path = os.path.join(pm.MANUAL_DIR, project_id, "reference_snapshot.json")
 
@@ -1994,7 +2000,7 @@ def sync_reference(project_id):
 
     def _add(old, new):
         old, new = str(old).strip(), str(new).strip()
-        if old and new and old != new:
+        if old and new and old != new and old.lower() != new.lower():
             replace_map[old] = new
 
     # 1. Flat dicts: characters, locations, terms, modern_terms
@@ -2004,7 +2010,14 @@ def sync_reference(project_id):
         # Changed values
         for k in old_dict:
             if k in new_dict and old_dict[k] != new_dict[k]:
-                _add(old_dict[k], new_dict[k])
+                old_val = old_dict[k]
+                new_val = new_dict[k]
+                # If pinyin=OFF, strip pinyin from locations/terms values
+                # so sync stays consistent with how chapters were translated
+                if not pinyin_on and key in ("locations", "terms"):
+                    old_val = tr._strip_pinyin(old_val)
+                    new_val = tr._strip_pinyin(new_val)
+                _add(old_val, new_val)
         # Also check if key itself renamed (old key not in new → find by similar value)
         # (skip for now — too ambiguous)
 
