@@ -150,7 +150,8 @@ def translate_chunk(text, src_lang, tgt_lang):
             truncation=True,
             max_length=600,
         ).to(_nllb_model.device)
-        forced_id = _nllb_tokenizer.lang_code_to_id[tgt_code]
+        _nllb_tokenizer.src_lang = src_code
+        forced_id = _nllb_tokenizer.convert_tokens_to_ids(tgt_code)
         with torch.no_grad():
             output = _nllb_model.generate(
                 **inputs,

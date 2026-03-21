@@ -584,9 +584,10 @@ def manual_project_menu(project_id):
         trans_mark    = "[✓]" if has_trans_meta else "[ ]"
         total_ch = meta.get("total_chapters", 0)
         total_mark = f" ({total_ch} ch)" if total_ch else ""
+        pinyin_mark = "[ON]" if meta.get("pinyin_annotations", True) else "[OFF]"
         print(f"[R] Refresh  [V] Reference  [S] Research {guide_mark}  [T] Translate Meta {trans_mark}")
         print(f"[U] Update Chapter Count{total_mark}  [G] Alt Titles  [I] Image Prompt  [A] Add Raw  [B] Back")
-        print(f"[X] Re-translate chapter  [C] Continuity check  [Y] Sync Reference")
+        print(f"[X] Re-translate chapter  [C] Continuity check  [Y] Sync Reference  [P] Pinyin annotations {pinyin_mark}")
         if chapters:
             print(f"[1-{len(chapters)}] Translate chapter")
         print("-" * 56)
@@ -627,6 +628,13 @@ def manual_project_menu(project_id):
             continuity_check(project_id)
         elif cmd == 'y':
             sync_reference(project_id)
+        elif cmd == 'p':
+            current = meta.get("pinyin_annotations", True)
+            new_val = not current
+            pm.update_manual_metadata(project_id, {"pinyin_annotations": new_val})
+            state = "ON" if new_val else "OFF"
+            print(f"[OK] Pinyin annotations: {state}. {'Anotasi pinyin akan muncul di first occurrence.' if new_val else 'Tidak ada anotasi pinyin/romanized — semua terjemah langsung ke target language.'}")
+            input("Press Enter...")
         elif cmd == 'g':
             generate_alt_titles(project_id)
         elif cmd == 'i':
@@ -1187,6 +1195,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
         clear_screen()
     meta     = pm.load_manual_metadata(project_id)
     target   = meta.get("target_lang", "Indonesian")
+    pinyin_annotations = meta.get("pinyin_annotations", True)
 
     print(f"--- Translate: {filename} ---\n")
 
@@ -1323,6 +1332,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             guide_text=guide_text,
             is_explicit=is_explicit,
             temp_dir=_temp_dir,
+            pinyin_annotations=pinyin_annotations,
         )
     elif engine_mode == "gemini_only":
         # Gemini utama, Ollama semua model sebagai backup — tidak ada kalimat yang gagal terjemah
@@ -1334,6 +1344,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             guide_text=guide_text,
             is_explicit=is_explicit,
             temp_dir=_temp_dir,
+            pinyin_annotations=pinyin_annotations,
         )
     elif engine_mode == "gemini_gemma3":
         # Gemini hanya analisis — gemma3 yang terjemahkan semua chunk
@@ -1347,6 +1358,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             source_lang=_src_lang,
             is_explicit=is_explicit,
             temp_dir=_temp_dir,
+            pinyin_annotations=pinyin_annotations,
         )
     elif engine_mode == "gemini_translategemma":
         # Gemini hanya analisis — translategemma yang terjemahkan semua chunk
@@ -1360,6 +1372,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             source_lang=_src_lang,
             is_explicit=is_explicit,
             temp_dir=_temp_dir,
+            pinyin_annotations=pinyin_annotations,
         )
     elif engine_mode in ("nllb_gemini", "nllb_translategemma", "nllb_gemma3"):
         refine = {"nllb_gemini": "gemini", "nllb_translategemma": "translategemma", "nllb_gemma3": "gemma3"}[engine_mode]
@@ -1373,6 +1386,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             is_explicit=is_explicit,
             temp_dir=_temp_dir,
             refine_engine=refine,
+            pinyin_annotations=pinyin_annotations,
         )
     else:
         # gemini_fallback: Gemini hanya untuk analisis/guide — Ollama menerjemahkan semua chunk
@@ -1385,6 +1399,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
             source_lang=_src_lang,
             is_explicit=is_explicit,
             temp_dir=_temp_dir,
+            pinyin_annotations=pinyin_annotations,
         )
     print()  # newline setelah progress bar
 

@@ -210,6 +210,42 @@ def _run_ollama(model, prompt, timeout=120):
     return None
 
 
+def _build_annotation_rule(target_lang, pinyin_annotations=True):
+    """Build annotation rule block. pinyin_annotations=False → output target lang only, no romanized forms."""
+    if not pinyin_annotations:
+        return (
+            f"ANNOTATION RULE:\n"
+            f"- Output {target_lang} ONLY. Do NOT include Chinese/Japanese/Korean characters, pinyin, romaji, or any romanized forms.\n"
+            f"- Translate ALL terms to {target_lang} meaning only — never use 'Romanized (Meaning)' format.\n"
+            f"  e.g. 剑气→'Energi Pedang', 丹田→'Pusat Energi' — NEVER write 'Jianqi (Energi Pedang)'.\n"
+            f"- Slang/idioms: use natural {target_lang} equivalent.\n"
+        )
+    return (
+        f"ANNOTATION RULE for locations & terms:\n"
+        f"1. Annotate ONLY on FIRST occurrence. Later occurrences: no parentheses.\n"
+        f"2. Chinese slang or concepts with a good {target_lang} equivalent: translate DIRECTLY — no romanized form, no annotation.\n"
+        f"   e.g. 躺平→'rebahan', 内卷→'persaingan ketat' — NEVER write 'Tang Ping (rebahan)' or 'Tang Ping (Lying flat)'.\n"
+        f"3. Geographic suffixes: translate directly, no annotation needed.\n"
+        f"   城=Kota, 殿=Aula, 宫=Istana, 河/水=Sungai, 山=Gunung, 门=Gerbang.\n"
+        f"   e.g. 'Kota Chang\\'an', 'Aula Xiande', 'Sungai Wei' — never keep suffix romanized.\n"
+        f"4. For proper nouns / cultivation concepts with no direct translation, use 'Romanized (Meaning in {target_lang})' on first occurrence.\n"
+        f"   e.g. 'Dong Gong (Istana Timur)', 'Dan Tian (Pusat Energi)' — meaning MUST be in {target_lang}, never English.\n"
+        f"5. WRONG: 'Era Wude (Era Wude)', 'System (Sistem)', 'Tang Ping (rebahan)', 'Tang Ping (Lying flat)' — all wrong.\n"
+    )
+
+
+def _build_term_enforcement(reference):
+    """Build a concise mandatory term block placed near end of prompt for maximum salience."""
+    terms = reference.get("terms", {})
+    if not terms:
+        return ""
+    items = " | ".join(f"{k}→{v}" for k, v in list(terms.items())[:30])
+    return (
+        "TERM ENFORCEMENT (MANDATORY — use right-side value VERBATIM, no synonyms/paraphrases):\n"
+        f"{items}\n"
+    )
+
+
 def translate_chapter(raw_text, reference, target_lang, models=None):
     """
     Terjemahkan satu bab menggunakan Ollama.
@@ -577,7 +613,7 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
                                ollama_models=None, chunk_size=2000,
                                progress_cb=None, guide_text="",
                                source_lang="Chinese", is_explicit=False,
-                               temp_dir=None):
+                               temp_dir=None, pinyin_annotations=True):
     """
     Engine terjemahan Ollama saja (tanpa Gemini). Cocok saat Gemini rate-limited.
     Fallback terakhir: NLLB jika semua Ollama masih ada CJK tersisa.
@@ -639,6 +675,8 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
 
     logger.info(f"[Translate/Ollama] {total} chunk(s) | target={target_lang}")
     modern_rule = _MODERN_TERMS_RULE if target_lang.lower() in ("indonesian", "indonesia", "id") else ""
+    annotation_rule = _build_annotation_rule(target_lang, pinyin_annotations)
+    term_enforcement = _build_term_enforcement(reference)
 
     role_prefix = _EXPLICIT_ROLE if is_explicit else ""
     prev_context = ""  # rolling context: last 3 sentences of previous chunk
@@ -661,8 +699,10 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
             f"OUTPUT MUST BE IN {target_lang} ONLY. Do NOT output in English or any other language.\n"
             f"{guide_block}\n"
             f"REFERENCE — proper nouns, do NOT translate as common words:\n{ref_block}\n\n"
+            f"{annotation_rule}\n"
             f"{modern_rule}"
             f"{context_block}"
+            f"{term_enforcement}"
             f"Translate ONLY the text below into {target_lang}. Output ONLY the translation, no notes:\n\n{chunk}"
         )
         result, used, cjk_candidate = None, None, None
@@ -730,7 +770,7 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
                                    ollama_models=None, chunk_size=2000,
                                    progress_cb=None, guide_text="",
                                    source_lang="Chinese", is_explicit=False,
-                                   temp_dir=None):
+                                   temp_dir=None, pinyin_annotations=True):
     """
     Engine terjemahan utama: Gemini per chunk, fallback Ollama jika disensor/gagal.
     Fallback terakhir: NLLB jika semua engine masih ada CJK tersisa.
@@ -793,18 +833,8 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
 
     guide_block = f"\nTRANSLATION GUIDE (follow strictly):\n{guide_text}\n" if guide_text.strip() else ""
 
-    annotation_rule = (
-        f"ANNOTATION RULE for locations & terms:\n"
-        f"1. Annotate ONLY on FIRST occurrence. Later occurrences: no parentheses.\n"
-        f"2. Chinese slang or concepts with a good {target_lang} equivalent: translate DIRECTLY — no romanized form, no annotation.\n"
-        f"   e.g. 躺平→'rebahan', 内卷→'persaingan ketat' — NEVER write 'Tang Ping (rebahan)' or 'Tang Ping (Lying flat)'.\n"
-        f"3. Geographic suffixes: translate directly, no annotation needed.\n"
-        f"   城=Kota, 殿=Aula, 宫=Istana, 河/水=Sungai, 山=Gunung, 门=Gerbang.\n"
-        f"   e.g. 'Kota Chang\\'an', 'Aula Xiande', 'Sungai Wei' — never keep suffix romanized.\n"
-        f"4. For proper nouns / cultivation concepts with no direct translation, use 'Romanized (Meaning in {target_lang})' on first occurrence.\n"
-        f"   e.g. 'Dong Gong (Istana Timur)', 'Dan Tian (Pusat Energi)' — meaning MUST be in {target_lang}, never English.\n"
-        f"5. WRONG: 'Era Wude (Era Wude)', 'System (Sistem)', 'Tang Ping (rebahan)', 'Tang Ping (Lying flat)' — all wrong.\n"
-    )
+    annotation_rule = _build_annotation_rule(target_lang, pinyin_annotations)
+    term_enforcement = _build_term_enforcement(reference)
     modern_rule = _MODERN_TERMS_RULE if target_lang.lower() in ("indonesian", "indonesia", "id") else ""
 
     classical_note = (
@@ -836,6 +866,7 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
             f"{annotation_rule}\n"
             f"{modern_rule}"
             f"{context_block}"
+            f"{term_enforcement}"
             f"Translate ONLY the text below into {target_lang}. Output ONLY the translation, no notes:\n\n{chunk}"
         )
 
@@ -1101,7 +1132,8 @@ def translate_with_nllb_pivot(raw_text, reference, target_lang,
                                ollama_models=None, chunk_size=2000,
                                progress_cb=None, guide_text="",
                                source_lang="Chinese", is_explicit=False,
-                               temp_dir=None, refine_engine="gemini"):
+                               temp_dir=None, refine_engine="gemini",
+                               pinyin_annotations=True):
     """
     NLLB pivot pipeline:
       1. NLLB translate source → English (pivot)
@@ -1187,6 +1219,7 @@ def translate_with_nllb_pivot(raw_text, reference, target_lang,
         )
 
     role_prefix = _EXPLICIT_ROLE if is_explicit else ""
+    term_enforcement = _build_term_enforcement(reference)
 
     # Split intermediate into chunks for refine pass
     chunks = _split_by_paragraphs(intermediate, chunk_size)
@@ -1212,6 +1245,7 @@ def translate_with_nllb_pivot(raw_text, reference, target_lang,
             f"{guide_block}\n"
             f"REFERENCE (proper nouns — keep exact spelling):\n{ref_block}\n\n"
             f"{context_block}"
+            f"{term_enforcement}"
             f"Translate/refine ONLY the text below into natural {target_lang}. "
             f"Output ONLY the translation, no notes:\n\n{chunk}"
         )
