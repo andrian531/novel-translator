@@ -15,7 +15,11 @@ A tool for translating web novels (Chinese/Japanese/Korean) with context awarene
 - **Website scraper**: Auto-explore and analyze novel websites, generate site configs; SPA sites (Vue/React `#/` routing) auto-detected and rendered via Playwright
 - **Add Raw Chapter**: Input chapter URL → auto-fetch → save to raw/; loops for next URL automatically (Enter to exit); unknown mirror auto-detected from project metadata
 - **Duplicate detection**: Project menu auto-detects raw chapters with identical content and flags them with `[!!]`
-- **Re-translate chapter**: Pick any translated chapter and re-translate it with the latest reference, overwriting the existing file
+- **Re-translate chapter**: Pick any translated chapter and re-translate it with the latest reference; supports single or batch selection (range `1-5`, list `1,3,5`, or combination `1-3,7`), engine chosen once for the whole batch
+- **Quality scan**: After each translation, automatically checks for remaining CJK characters and warns if any are found
+- **Translation log**: `translation_log.json` records which engine was used for each chapter, with timestamp and NLLB model info if applicable
+- **Pinyin annotations toggle** `[P]`: Per-project toggle — ON adds romanized annotations on first occurrence of new terms; OFF strips pinyin from reference values and instructs the model to translate cultural terms directly, while still preserving proper nouns listed in reference
+- **Term enforcement**: High-priority block injected at the end of every translation prompt listing key terms with mandatory verbatim usage
 - **Continuity check**: Scan all translated chapters for character name inconsistencies (fuzzy match vs `character_profiles`); indexed by `character_appearances.json` to reduce false positives — only characters known to appear in a chapter are checked against it
 - **Name spelling enforcement**: Character `romanized_name` injected as fixed spelling rule — Gemini warned not to create variant spellings
 - **Sync Reference**: Detect changes in `reference.json` (vs snapshot), show full replacement report with line numbers, confirm once, apply across all translated chapters, write `sync_log.txt`
@@ -27,18 +31,18 @@ A tool for translating web novels (Chinese/Japanese/Korean) with context awarene
 
 | Option | Analysis | Translator | Notes |
 |--------|----------|------------|-------|
-| 1 | Gemini | Ollama (all models, source-lang priority) | Hemat — Gemini only for guide |
+| 1 | Gemini | Ollama (all models, source-lang priority) | Efficient — Gemini only for guide |
 | 2 | — | Ollama (all models) | Fully offline |
 | 3 | Gemini | Gemini (Ollama as backup) | Best quality, uses API quota |
 | 4 | Gemini | gemma3 only | Fast, consistent |
 | 5 | Gemini | translategemma only | Best for explicit Chinese novels |
-| 6 *(exp)* | Gemini | NLLB → Gemini refine | Pivot: CN→EN (NLLB) then EN→target (Gemini) |
-| 7 *(exp)* | Gemini | NLLB → translategemma refine | Pivot with local refiner |
-| 8 *(exp)* | Gemini | NLLB → gemma3 refine | Pivot with gemma3 refiner |
+| 6 *(exp)* | Gemini | NLLB → Gemini refine | ⚠ Not recommended for CJK — pivot causes info loss |
+| 7 *(exp)* | Gemini | NLLB → translategemma refine | ⚠ Not recommended for CJK |
+| 8 *(exp)* | Gemini | NLLB → gemma3 refine | ⚠ Not recommended for CJK |
 
 **Recommendation for explicit Chinese novels:** Use option 5 (translategemma). qwen models tend to self-censor and fall back, causing slower and inconsistent output. gemma3/translategemma are more faithful for this content type.
 
-**NLLB pivot pipeline (modes 6–8):** Source text translated to English first via NLLB (local model, no API), then an AI model refines EN→target with context. Requires `facebook/nllb-200-3.3B` (or smaller) downloaded via `install.bat`. Name placeholder protection prevents character names from being mangled by NLLB; post-NLLB CJK scan detects untranslated Chinese characters and flags them for the refiner.
+**NLLB pivot pipeline (modes 6–8):** Not recommended for CJK (Chinese/Japanese/Korean) novels. Gemini reads CJK natively — adding an NLLB intermediate step (source→English) introduces a "telephone game" information loss with no benefit. NLLB pivot is only useful when the source language is one Gemini handles poorly. Requires `facebook/nllb-200-3.3B` (or smaller) downloaded via `install.bat`.
 
 ## Project Structure
 
@@ -79,7 +83,8 @@ novel-translator/
         ├── reference_snapshot.json    # Snapshot of reference at last sync (diff baseline)
         ├── character_appearances.json # Per-chapter index of which characters appear (continuity check)
         ├── translation_guide.json     # Style guide (English, auto-generated)
-        ├── chapter_context.json       # Rolling chapter summaries (English)
+        ├── chapter_context.json       # Rolling chapter summaries (capped at 5 entries, 350 chars each)
+        ├── translation_log.json       # Per-chapter engine log (engine, timestamp, nllb_model)
         ├── sync_log.txt               # Append-only log of all Sync Reference runs
         ├── temp/                      # Crash recovery (gitignored, portable with project)
         │   └── translate_progress.json
