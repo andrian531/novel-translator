@@ -16,6 +16,8 @@ A tool for translating web novels (Chinese/Japanese/Korean) with context awarene
 - **Add Raw Chapter**: Input chapter URL → auto-fetch → save to raw/; loops for next URL automatically (Enter to exit); unknown mirror auto-detected from project metadata
 - **Duplicate detection**: Project menu auto-detects raw chapters with identical content and flags them with `[!!]`
 - **Re-translate chapter**: Pick any translated chapter and re-translate it with the latest reference; supports single or batch selection (range `1-5`, list `1,3,5`, or combination `1-3,7`), engine chosen once for the whole batch
+- **Translation stats** `[D]`: Per-project dashboard — progress bar, translated/pending counts, engine breakdown from translation log, last translated chapter timestamp, total and average character counts
+- **Auto chapter count**: Chapter count in metadata auto-updates when raw chapter files exceed the recorded total — no manual `[U]` needed
 - **Quality scan**: After each translation, automatically checks for remaining CJK characters and warns if any are found
 - **Translation log**: `translation_log.json` records which engine was used for each chapter, with timestamp and NLLB model info if applicable
 - **Pinyin annotations toggle** `[P]`: Per-project toggle — ON adds romanized annotations on first occurrence of new terms; OFF strips pinyin from reference values and instructs the model to translate cultural terms directly, while still preserving proper nouns listed in reference
@@ -146,6 +148,10 @@ Reader features:
 - Font size controls (`A−` / `A+`) in chapter header, saved to localStorage
 - Keyboard navigation: `←` / `→` arrow keys for prev/next chapter
 - Reading progress saved per novel — "Continue reading" shortcut on HomeView and NovelView
+
+## License
+
+MIT License — see [LICENSE](LICENSE)
 
 ## Requirements
 

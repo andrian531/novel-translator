@@ -583,11 +583,14 @@ def manual_project_menu(project_id):
         has_trans_meta = bool(meta.get("title_translated") or meta.get("synopsis_translated"))
         trans_mark    = "[✓]" if has_trans_meta else "[ ]"
         total_ch = meta.get("total_chapters", 0)
+        if len(chapters) > total_ch:
+            total_ch = len(chapters)
+            pm.update_manual_metadata(project_id, {"total_chapters": total_ch})
         total_mark = f" ({total_ch} ch)" if total_ch else ""
         pinyin_mark = "[ON]" if meta.get("pinyin_annotations", True) else "[OFF]"
         print(f"[R] Refresh  [V] Reference  [S] Research {guide_mark}  [T] Translate Meta {trans_mark}")
         print(f"[U] Update Chapter Count{total_mark}  [G] Alt Titles  [I] Image Prompt  [A] Add Raw  [B] Back")
-        print(f"[X] Re-translate chapter  [C] Continuity check  [Y] Sync Reference  [P] Pinyin annotations {pinyin_mark}")
+        print(f"[X] Re-translate chapter  [C] Continuity check  [Y] Sync Reference  [P] Pinyin annotations {pinyin_mark}  [D] Stats")
         if chapters:
             print(f"[1-{len(chapters)}] Translate chapter")
         print("-" * 56)
@@ -635,6 +638,8 @@ def manual_project_menu(project_id):
             state = "ON" if new_val else "OFF"
             print(f"[OK] Pinyin annotations: {state}. {'Pinyin annotations will appear on first occurrence.' if new_val else 'No pinyin/romanized annotations — all terms translated directly into target language.'}")
             input("Press Enter...")
+        elif cmd == 'd':
+            _show_stats(project_id)
         elif cmd == 'g':
             generate_alt_titles(project_id)
         elif cmd == 'i':
@@ -1688,6 +1693,80 @@ def retranslate_chapter(project_id):
         print(f"\n{'='*56}")
         print(f"[DONE] Batch retranslate complete: {ok} OK, {fail} failed.")
         input("Press Enter...")
+
+
+def _show_stats(project_id):
+    """Translation stats dashboard for a project."""
+    import json
+    meta     = pm.load_manual_metadata(project_id)
+    chapters = pm.list_raw_chapters(project_id)
+    total_ch = meta.get("total_chapters", 0) or len(chapters)
+
+    translated   = [f for f in chapters if pm.is_chapter_translated(project_id, f)]
+    empty        = [f for f in chapters if pm.is_raw_chapter_empty(project_id, f)]
+    untranslated = [f for f in chapters if f not in translated and f not in empty]
+
+    pct = int(len(translated) / total_ch * 100) if total_ch else 0
+    bar_len = 30
+    filled  = int(bar_len * pct / 100)
+    bar     = "█" * filled + "░" * (bar_len - filled)
+
+    log_path = os.path.join(pm.MANUAL_DIR, project_id, "translation_log.json")
+    log = {}
+    if os.path.exists(log_path):
+        try:
+            log = json.load(open(log_path, encoding='utf-8'))
+        except Exception:
+            pass
+
+    # Engine breakdown from log
+    engine_counts = {}
+    for entry in log.values():
+        lbl = entry.get("engine_label", entry.get("engine", "?"))
+        engine_counts[lbl] = engine_counts.get(lbl, 0) + 1
+
+    # Last translate timestamp
+    last_ts = None
+    last_ch = None
+    for fname, entry in log.items():
+        ts = entry.get("timestamp", "")
+        if last_ts is None or ts > last_ts:
+            last_ts = ts
+            last_ch = fname
+
+    # Char count of translated chapters
+    total_chars = 0
+    for fname in translated:
+        txt = pm.load_translated_chapter(project_id, fname) or ""
+        total_chars += len(txt)
+
+    clear_screen()
+    print("=" * 56)
+    print(f"  STATS — {meta.get('title', project_id)}")
+    print("=" * 56)
+    print(f"  Progress : [{bar}] {pct}%")
+    print(f"  Chapters : {len(translated)}/{total_ch} translated"
+          + (f"  |  {len(empty)} empty" if empty else ""))
+    if untranslated:
+        print(f"  Pending  : {len(untranslated)} chapter(s) not yet translated")
+    print(f"  Language : {meta.get('source_lang','?')} → {meta.get('target_lang','?')}")
+    print(f"  Pinyin   : {'ON' if meta.get('pinyin_annotations', True) else 'OFF'}")
+    print()
+    if engine_counts:
+        print("  Engine breakdown:")
+        for lbl, cnt in sorted(engine_counts.items(), key=lambda x: -x[1]):
+            print(f"    {cnt:>3}x  {lbl}")
+    else:
+        print("  Engine breakdown: no log data yet")
+    print()
+    if last_ch:
+        print(f"  Last translated : {last_ch}  ({last_ts})")
+    if total_chars:
+        print(f"  Total chars     : {total_chars:,}")
+        if len(translated):
+            print(f"  Avg per chapter : {total_chars // len(translated):,}")
+    print("-" * 56)
+    input("Press Enter to go back...")
 
 
 def _save_translation_log(project_id, filename, engine_mode, engine_label):
