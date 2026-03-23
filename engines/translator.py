@@ -48,6 +48,12 @@ _DOLPHIN_ORDER = [
 
 # Role prompt for explicit/adult content — frames translation as professional work
 # so models translate faithfully without refusal or self-censorship.
+_DEDUP_RULE = (
+    "DEDUPLICATION RULE: If the source text contains repeated content "
+    "(the same passage appears more than once), translate it ONCE only — "
+    "skip all duplicate occurrences silently.\n"
+)
+
 _EXPLICIT_ROLE = (
     "You are a professional literary translator specializing in adult fiction. "
     "Your role is purely technical: translate the source text faithfully and completely into the target language. "
@@ -469,7 +475,7 @@ def analyze_chapter_with_context(raw_text, context="", existing_reference=None):
             for p in profiles:
                 rname = p.get('romanized_name', p.get('original_name', '?'))
                 aliases = p.get("aliases", [])
-                alias_str = ", ".join(a["romanized"] if isinstance(a, dict) else str(a) for a in aliases) if aliases else "-"
+                alias_str = ", ".join(a.get("romanized", a.get("romanized_name", a.get("name", str(a)))) if isinstance(a, dict) else str(a) for a in aliases) if aliases else "-"
                 profile_lines.append(f"  {rname} | aliases: {alias_str}")
                 for r in p.get("relationships", []):
                     profile_lines.append(
@@ -677,7 +683,9 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
             aliases = p.get("aliases", [])
             if aliases:
                 alias_parts = ", ".join(
-                    f"\"{a['romanized']}\" ({a.get('context', '')})" if isinstance(a, dict) else f"\"{a}\"" for a in aliases
+                    f"\"{a.get('romanized', a.get('romanized_name', a.get('name', str(a))))}\" ({a.get('context', '')})"
+                    if isinstance(a, dict) else f"\"{a}\""
+                    for a in aliases
                 )
                 profile_lines.append(f"  {base} | aliases: {alias_parts}")
             for r in p.get("relationships", []):
@@ -730,6 +738,7 @@ def translate_with_ollama_only(raw_text, reference, target_lang,
             f"{modern_rule}"
             f"{context_block}"
             f"{term_enforcement}"
+            f"{_DEDUP_RULE}"
             f"Translate ONLY the text below into {target_lang}. Output ONLY the translation, no notes:\n\n{chunk}"
         )
         result, used, cjk_candidate = None, None, None
@@ -836,7 +845,9 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
             aliases = p.get("aliases", [])
             if aliases:
                 alias_parts = ", ".join(
-                    f"\"{a['romanized']}\" ({a.get('context', '')})" if isinstance(a, dict) else f"\"{a}\"" for a in aliases
+                    f"\"{a.get('romanized', a.get('romanized_name', a.get('name', str(a))))}\" ({a.get('context', '')})"
+                    if isinstance(a, dict) else f"\"{a}\""
+                    for a in aliases
                 )
                 profile_lines.append(f"  {base} | aliases: {alias_parts}")
             for r in p.get("relationships", []):
@@ -896,6 +907,7 @@ def translate_with_gemini_primary(raw_text, reference, target_lang,
             f"{modern_rule}"
             f"{context_block}"
             f"{term_enforcement}"
+            f"{_DEDUP_RULE}"
             f"Translate ONLY the text below into {target_lang}. Output ONLY the translation, no notes:\n\n{chunk}"
         )
 
@@ -1231,7 +1243,7 @@ def translate_with_nllb_pivot(raw_text, reference, target_lang,
             rname = p.get('romanized_name', p.get('original_name', '?'))
             aliases = p.get("aliases", [])
             alias_str = ", ".join(
-                a["romanized"] if isinstance(a, dict) else str(a) for a in aliases
+                a.get("romanized", a.get("romanized_name", a.get("name", str(a)))) if isinstance(a, dict) else str(a) for a in aliases
             ) if aliases else "-"
             profile_lines.append(f"  {rname} | aliases: {alias_str}")
         if profile_lines:

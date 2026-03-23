@@ -35,6 +35,7 @@ def create_project(novel_data):
 
     os.makedirs(os.path.join(path, "chapters", "raw"), exist_ok=True)
     os.makedirs(os.path.join(path, "chapters", "translated"), exist_ok=True)
+    os.makedirs(os.path.join(path, "covers"), exist_ok=True)
 
     meta_file = os.path.join(path, "metadata.json")
     if not os.path.exists(meta_file):
@@ -145,6 +146,7 @@ def create_manual_project(title, source_lang, target_lang, synopsis="",
     project_id = base
     os.makedirs(os.path.join(path, "chapters", "raw"),        exist_ok=True)
     os.makedirs(os.path.join(path, "chapters", "translated"), exist_ok=True)
+    os.makedirs(os.path.join(path, "covers"),                 exist_ok=True)
 
     _write_json(os.path.join(path, "metadata.json"), {
         "id":           project_id,

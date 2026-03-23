@@ -17,7 +17,7 @@ from engines.logger import logger
 # Playwright fetch (headless browser)
 # ------------------------------------------------------------------
 
-def _fetch_with_playwright(url, wait_seconds=3):
+def _fetch_with_playwright(url, wait_seconds=3, cookies=None):
     """Open URL with headless Chrome, return (html, final_url)."""
     try:
         from playwright.sync_api import sync_playwright
@@ -33,6 +33,8 @@ def _fetch_with_playwright(url, wait_seconds=3):
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 locale="zh-CN",
             )
+            if cookies:
+                context.add_cookies(cookies)
             page = context.new_page()
             try:
                 response = page.goto(url, timeout=30000, wait_until="domcontentloaded")
@@ -53,6 +55,106 @@ def _fetch_with_playwright(url, wait_seconds=3):
     except Exception as e:
         logger.error(f"[site_analyzer] Playwright launch error: {e}")
         return None, url
+
+
+def _attempt_login(login_url, username, password):
+    """
+    Attempt login via Playwright. Returns (cookies, success).
+    Looks for input[type=password] on the login page, fills username + password, submits.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return [], False
+
+    print(f"  [browser] Opening login page: {login_url} ...")
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            )
+            page = context.new_page()
+            try:
+                page.goto(login_url, timeout=30000, wait_until="domcontentloaded")
+                page.wait_for_timeout(1500)
+                url_before = page.url
+
+                # Find password field
+                pw_input = page.query_selector("input[type=password]")
+                if not pw_input:
+                    print("  [!] No password field found on login page.")
+                    browser.close()
+                    return [], False
+
+                # Find username field: input[type=text/email] or input[name*=user/name/email/login/account]
+                user_input = None
+                for sel in [
+                    "input[type=email]",
+                    "input[type=text][name*=user]", "input[type=text][name*=name]",
+                    "input[type=text][name*=email]", "input[type=text][name*=login]",
+                    "input[type=text][name*=account]", "input[type=text]",
+                ]:
+                    user_input = page.query_selector(sel)
+                    if user_input:
+                        break
+
+                if user_input:
+                    user_input.fill(username)
+                pw_input.fill(password)
+
+                # Submit: find submit button near password field
+                submit = page.query_selector("input[type=submit], button[type=submit], button:has-text('login'), button:has-text('Login'), button:has-text('登录'), button:has-text('ログイン')")
+                if submit:
+                    submit.click()
+                else:
+                    pw_input.press("Enter")
+
+                page.wait_for_timeout(3000)
+                url_after = page.url
+
+                cookies = context.cookies()
+                browser.close()
+
+                if url_after != url_before:
+                    print(f"  [OK] Login successful (redirected to {url_after})")
+                    return cookies, True
+                else:
+                    print(f"  [!] Login failed — still on login page. Continuing without login.")
+                    return [], False
+            except Exception as e:
+                logger.error(f"[site_analyzer] Login error: {e}")
+                browser.close()
+                return [], False
+    except Exception as e:
+        logger.error(f"[site_analyzer] Login launch error: {e}")
+        return [], False
+
+
+def _save_credentials(domain, username, password, login_url):
+    """Save credentials to config/credentials.json (gitignored)."""
+    import json
+    cred_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "credentials.json")
+    try:
+        creds = json.load(open(cred_path, encoding="utf-8")) if os.path.exists(cred_path) else {}
+    except Exception:
+        creds = {}
+    creds[domain] = {"username": username, "password": password, "login_url": login_url}
+    with open(cred_path, "w", encoding="utf-8") as f:
+        json.dump(creds, f, ensure_ascii=False, indent=2)
+
+
+def _load_credentials(domain):
+    """Load credentials for a domain from config/credentials.json."""
+    import json
+    cred_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "credentials.json")
+    if not os.path.exists(cred_path):
+        return None
+    try:
+        creds = json.load(open(cred_path, encoding="utf-8"))
+        return creds.get(domain)
+    except Exception:
+        return None
 
 
 # ------------------------------------------------------------------
@@ -650,9 +752,36 @@ def analyze_website(manager=None):
     base_domain = f"{parsed_input.scheme}://{parsed_input.netloc}"
     all_structures = {}
 
+    # ── Login (optional) ──────────────────────────────────────────
+    session_cookies = []
+    saved_cred = _load_credentials(input_domain)
+    if saved_cred:
+        print(f"\n  [*] Saved credentials found for {input_domain} (user: {saved_cred['username']})")
+        use_saved = input("  Use saved credentials? (Y/n): ").strip().lower()
+        if use_saved != "n":
+            cookies, ok = _attempt_login(saved_cred["login_url"], saved_cred["username"], saved_cred["password"])
+            if ok:
+                session_cookies = cookies
+            # if failed, continue without — message already printed in _attempt_login
+    else:
+        login_url = input("\n  Login page URL (Enter to skip): ").strip()
+        if login_url:
+            if not login_url.startswith("http"):
+                login_url = base_domain + login_url
+            username = input("  Username / Email (Enter to skip): ").strip()
+            if username:
+                import getpass
+                password = getpass.getpass("  Password: ")
+                if password:
+                    cookies, ok = _attempt_login(login_url, username, password)
+                    if ok:
+                        session_cookies = cookies
+                        _save_credentials(input_domain, username, password, login_url)
+                        print(f"  [OK] Credentials saved for future use.")
+
     # ── Step 1: Homepage ──────────────────────────────────────────
     print(f"\n  [1/4] Opening homepage...")
-    html, final_url = _fetch_with_playwright(homepage_url)
+    html, final_url = _fetch_with_playwright(homepage_url, cookies=session_cookies)
     if not html:
         print("  [!] Failed to load homepage.")
         return
@@ -680,51 +809,51 @@ def analyze_website(manager=None):
         print(f"  [~] Search form not detected")
     all_structures["search_info"] = search_info
 
-    # ── Step 2: Category/listing page ────────────────────────────
-    print(f"\n  [2/4] Exploring listing/category pages...")
-    cat_links = _find_listing_candidates(soup, base_domain)
+    # ── Step 2: Category/listing pages (user-provided) ───────────
+    print(f"\n  [2/4] Listing/category pages")
+    print(f"  Paste listing page URLs one by one (e.g. ranking, genre, category pages).")
+    print(f"  Press Enter with no input when done.")
     listing_soup = None
-    if cat_links:
-        print(f"  [+] Found {len(cat_links)} candidate listing URL(s): {', '.join(cat_links)}")
-        # Try each candidate — use the first one that contains novel items (list_candidates > 0)
-        for cat_url in cat_links:
-            print(f"  [+] Trying: {cat_url}")
-            cat_html, cat_final = _fetch_with_playwright(cat_url, wait_seconds=2)
-            if not cat_html:
-                continue
-            cat_soup_tmp = BeautifulSoup(cat_html, "html.parser")
-            cat_structure = _extract_structure(cat_html, cat_final)
-            # Check if this page has list areas with multiple items
-            has_listing = any(c["item_count"] >= 5 for c in cat_structure["list_candidates"])
-            if has_listing:
-                listing_soup = cat_soup_tmp
-                all_structures["category_listing_page"] = {
-                    "url": cat_final,
-                    "list_candidates": cat_structure["list_candidates"],
-                    "headings": cat_structure["headings"][:3],
-                    "sample_links": cat_structure["sample_links"][:10],
-                }
-                print(f"  [OK] Found listing page — {len(cat_structure['list_candidates'])} list area(s)")
-                break
-            else:
-                print(f"  [~] No listing items found, trying next...")
+    listing_idx = 0
+    while True:
+        listing_idx += 1
+        raw_cat = input(f"  Listing URL #{listing_idx} (Enter to skip/done): ").strip()
+        if not raw_cat:
+            break
+        cat_url = raw_cat if raw_cat.startswith("http") else base_domain + raw_cat
+        print(f"  [+] Opening: {cat_url}")
+        cat_html, cat_final = _fetch_with_playwright(cat_url, wait_seconds=2, cookies=session_cookies)
+        if not cat_html:
+            print(f"  [!] Failed to load. Try another URL.")
+            listing_idx -= 1
+            continue
+        cat_soup_tmp = BeautifulSoup(cat_html, "html.parser")
+        cat_structure = _extract_structure(cat_html, cat_final)
+        key = "category_listing_page" if listing_idx == 1 else f"category_listing_page_{listing_idx}"
+        all_structures[key] = {
+            "url": cat_final,
+            "list_candidates": cat_structure["list_candidates"],
+            "headings": cat_structure["headings"][:3],
+            "sample_links": cat_structure["sample_links"][:10],
+        }
+        item_counts = [c["item_count"] for c in cat_structure["list_candidates"]]
+        print(f"  [OK] Listing page added — {len(cat_structure['list_candidates'])} list area(s), items: {item_counts}")
+        if listing_soup is None:
+            listing_soup = cat_soup_tmp
     if not listing_soup:
-        print(f"  [~] No listing page found — using homepage as fallback")
+        print(f"  [~] No listing page provided — using homepage as fallback")
 
-    # ── Step 3: Novel detail page ─────────────────────────────────
-    print(f"\n  [3/4] Opening a novel detail page...")
+    # ── Step 3: Novel detail page (user-provided) ─────────────────
+    print(f"\n  [3/4] Novel detail page")
+    print(f"  Paste a URL of a specific novel's detail/info page.")
+    manual = input("  Novel detail URL (Enter to skip): ").strip()
     novel_url = None
-    search_soup = listing_soup or soup
-    novel_url = _find_novel_link(search_soup, base_domain)
-    if not novel_url:
-        print(f"  [~] Could not auto-detect a novel detail page link.")
-        manual = input("  Paste a novel detail page URL manually (or Enter to skip): ").strip()
-        if manual:
-            novel_url = manual if manual.startswith("http") else base_domain + manual
+    if manual:
+        novel_url = manual if manual.startswith("http") else base_domain + manual
 
     if novel_url:
         print(f"  [+] Opening novel: {novel_url}")
-        nov_html, nov_final = _fetch_with_playwright(novel_url, wait_seconds=2)
+        nov_html, nov_final = _fetch_with_playwright(novel_url, wait_seconds=2, cookies=session_cookies)
         if nov_html:
             nov_soup = BeautifulSoup(nov_html, "html.parser")
             nov_structure = _extract_structure(nov_html, nov_final)
@@ -748,7 +877,7 @@ def analyze_website(manager=None):
             if ch_candidates:
                 ch_url = ch_candidates[0]["url"]
                 print(f"  [+] Opening chapter: {ch_url}")
-                ch_html, ch_final = _fetch_with_playwright(ch_url, wait_seconds=2)
+                ch_html, ch_final = _fetch_with_playwright(ch_url, wait_seconds=2, cookies=session_cookies)
                 if ch_html:
                     ch_structure = _extract_structure(ch_html, ch_final)
                     all_structures["chapter_page"] = {

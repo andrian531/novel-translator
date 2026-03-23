@@ -432,23 +432,14 @@ def manual_project_new():
     print(f"\n[OK] Project created!")
 
     if total_chapters > 0:
-        created, _ = pm.scaffold_raw_chapters(project_id, total_chapters)
         pm.update_manual_metadata(project_id, {"total_chapters": total_chapters})
-        print(f"[OK] {created} empty chapter files created (chapter_001 … chapter_{str(total_chapters).zfill(max(3,len(str(total_chapters))))}.txt)")
 
     # Translate title + synopsis to target_lang and save in metadata
     if title or synopsis:
         _translate_metadata(project_id)
 
-    if total_chapters == 0:
-        print(f"\n  Copy chapter files (.txt) to:")
-        print(f"  {raw_path}")
-        print(f"\n  One file = one chapter. Any filename works, e.g.:")
-        print(f"    chapter_001.txt, ch01.txt, ch_001.txt, etc.")
-    else:
-        print(f"\n  Empty chapter files are ready at:")
-        print(f"  {raw_path}")
-        print(f"  Fill each file with the chapter content.")
+    print(f"\n  Add chapters via [A] Add Raw in the project menu, or copy .txt files to:")
+    print(f"  {raw_path}")
     input("\nPress Enter to open project menu...")
     manual_project_menu(project_id)
 
@@ -655,20 +646,179 @@ def manual_project_menu(project_id):
                     batch_translate_chapters(project_id, [chapters[i-1] for i in valid])
 
 
+
+def _deduplicate_content(content):
+    """
+    Detect and remove duplicated raw content before translation.
+    Raw file is NOT modified — only the in-memory content fed to translator is cleaned.
+    """
+    lines = content.splitlines()
+    body_lines = [l for l in lines if len(l.strip()) >= 20]
+    if len(body_lines) < 2:
+        return content
+    threshold = int(len(content) * 0.25)
+    min_idx = None
+    for anchor_line in body_lines[:8]:
+        anchor = anchor_line.strip()
+        first_pos = content.find(anchor)
+        if first_pos == -1:
+            continue
+        start_search = max(first_pos + len(anchor), threshold)
+        idx = content.find(anchor, start_search)
+        if idx != -1:
+            if min_idx is None or idx < min_idx:
+                min_idx = idx
+    if min_idx is not None:
+        cutpoint = min_idx
+        for end_marker in ("！", "。", "？", "\n"):
+            pos = content.rfind(end_marker, max(0, min_idx - 200), min_idx)
+            if pos != -1:
+                cutpoint = pos + len(end_marker)
+                break
+        truncated = content[:cutpoint].rstrip()
+        removed = len(content) - len(truncated)
+        print(f"  [!] Duplicate content detected in raw ({removed} chars) — feeding deduplicated text to translator.")
+        return truncated
+    return content
+
+
+def _load_url_log(project_id):
+    """Load URL log for a project. Returns dict {url: filename}."""
+    import json
+    log_path = os.path.join(pm.MANUAL_DIR, project_id, "url_log.json")
+    if not os.path.exists(log_path):
+        return {}
+    try:
+        return json.load(open(log_path, encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_url_log(project_id, url_log):
+    """Save URL log for a project."""
+    import json
+    log_path = os.path.join(pm.MANUAL_DIR, project_id, "url_log.json")
+    with open(log_path, "w", encoding="utf-8") as f:
+        json.dump(url_log, f, ensure_ascii=False, indent=2)
+
+
+def _detect_url_pattern(url1, url2):
+    """
+    Detect sequential URL pattern from two consecutive URLs.
+    Returns (prefix, suffix, next_num) or None if no pattern found.
+    Example: /book/193653/4.html and /book/193653/5.html → ('/book/193653/', '.html', 6)
+    """
+    import re
+    # Find all numbers in both URLs
+    nums1 = [(m.start(), m.end(), int(m.group())) for m in re.finditer(r'\d+', url1)]
+    nums2 = [(m.start(), m.end(), int(m.group())) for m in re.finditer(r'\d+', url2)]
+    if len(nums1) != len(nums2):
+        return None
+    # Find the position where number changed by exactly 1
+    diff_positions = [(i, n1, n2) for i, ((_,_,n1), (_,_,n2)) in enumerate(zip(nums1, nums2)) if n1 != n2]
+    if len(diff_positions) != 1:
+        return None
+    idx, n1, n2 = diff_positions[0]
+    if n2 - n1 != 1:
+        return None
+    s, e, _ = nums1[idx]
+    prefix = url1[:s]
+    suffix = url1[e:]
+    return prefix, suffix, n2 + 1
+
+
 def add_raw_chapter_from_url(project_id):
     """
     Fetch chapter content (+ title) dari URL lalu simpan ke raw folder.
     Loop: setelah save otomatis minta URL berikutnya. Enter kosong = kembali ke menu.
+    Auto-detects sequential URL pattern and offers batch fetch every 10 chapters.
     """
     from engines.scraper_manager import ScraperManager
     sm = ScraperManager()
+    url_log = _load_url_log(project_id)
+    recent_urls = []  # last 2 successfully added URLs for pattern detection
 
     print("\n[Add Raw Chapter from URL]  (Enter empty to go back)")
+    if url_log:
+        print(f"  {len(url_log)} URL(s) already logged for this project.")
+
+    def _run_batch(prefix, suffix, next_num):
+        """Offer and execute sequential batch fetch. Returns updated (recent_urls, next_num)."""
+        while True:
+            print(f"\n  [~] Sequential pattern: {prefix}{{N}}{suffix}")
+            print(f"  Next 10: {prefix}{next_num}{suffix}  →  {prefix}{next_num+9}{suffix}")
+            ans = input("  Fetch next 10 chapters? [Y/n/q]: ").strip().lower()
+            if ans == 'q' or ans == '':
+                return [], next_num
+            if ans == 'n':
+                return recent_urls, next_num
+            failed = False
+            last_two = list(recent_urls)
+            for i in range(10):
+                batch_url = f"{prefix}{next_num}{suffix}"
+                if batch_url in url_log:
+                    print(f"  [!] Already added: {batch_url} — skipping.")
+                    next_num += 1
+                    continue
+                fname = _add_raw_single(project_id, batch_url, sm=sm)
+                if fname:
+                    url_log[batch_url] = fname
+                    _save_url_log(project_id, url_log)
+                    last_two = [last_two[-1], batch_url] if last_two else [batch_url]
+                    next_num += 1
+                else:
+                    print(f"  [!] Failed to fetch {batch_url} — stopping auto-batch.")
+                    failed = True
+                    break
+            if failed:
+                return [], next_num
+            # Recalculate pattern from last two fetched
+            if len(last_two) == 2:
+                p2 = _detect_url_pattern(last_two[0], last_two[1])
+                if p2:
+                    prefix, suffix, next_num = p2
+        return last_two, next_num
+
+    # Pre-check: detect pattern already in url_log
+    log_keys = list(url_log.keys())
+    log_pattern = None
+    if len(log_keys) >= 2:
+        log_pattern = _detect_url_pattern(log_keys[-2], log_keys[-1])
+
     while True:
-        url = input("\nChapter URL: ").strip()
+        if log_pattern:
+            prefix, suffix, next_num = log_pattern
+            prompt = f"\nChapter URL (Enter to continue from {prefix}{next_num}{suffix}): "
+        else:
+            prompt = "\nChapter URL (Enter to go back): "
+
+        url = input(prompt).strip()
+
         if not url:
+            if log_pattern:
+                # User pressed Enter → start sequential batch from next URL
+                recent_urls, _ = _run_batch(prefix, suffix, next_num)
+                log_pattern = None
+                continue
             return
-        _add_raw_single(project_id, url, sm=sm)
+
+        if url in url_log:
+            print(f"  [!] This URL was already added as '{url_log[url]}'. Enter a different URL.")
+            continue
+        saved_fname = _add_raw_single(project_id, url, sm=sm)
+        if saved_fname:
+            url_log[url] = saved_fname
+            _save_url_log(project_id, url_log)
+            recent_urls.append(url)
+            if len(recent_urls) > 2:
+                recent_urls.pop(0)
+
+            # Update log_pattern from last 2 (log or new inputs)
+            all_keys = list(url_log.keys())
+            if len(all_keys) >= 2:
+                log_pattern = _detect_url_pattern(all_keys[-2], all_keys[-1])
+            else:
+                log_pattern = None
 
 
 def _add_raw_single(project_id, url, sm=None):
@@ -735,7 +885,7 @@ def _add_raw_single(project_id, url, sm=None):
     if not content:
         print("  [-] Failed to fetch chapter content. Check the URL or site config.")
         input("Press Enter...")
-        return
+        return None
 
     # --- Konfirmasi title (hanya jika confidence rendah) ---
     if title_conf == "low":
@@ -772,6 +922,7 @@ def _add_raw_single(project_id, url, sm=None):
     print(f"\n  [OK] Saved: {fname} ({len(full_content)} chars)")
     if title:
         print(f"  Title: {title}")
+    return fname
 
 
 def _ensure_content_rating(project_id, meta):
@@ -1211,6 +1362,7 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
         if not batch_mode:
             input("Press Enter...")
         return False
+    raw_text = _deduplicate_content(raw_text)
 
     print(f"  Text: {len(raw_text)} characters")
     print(f"  Target: {target}\n")
@@ -1475,8 +1627,8 @@ def manual_translate_chapter(project_id, filename, engine_mode=None, batch_mode=
 
     # Update name index (for continuity check)
     _update_name_index(project_id, filename, translated, ref.get("character_profiles", []))
-    _save_translation_log(project_id, filename, engine_mode, engine_label)
-    _quality_scan(translated, ref, filename)
+    quality = _quality_scan(translated, ref, filename, raw_text=raw_text)
+    _save_translation_log(project_id, filename, engine_mode, engine_label, quality=quality, stats=stats)
 
     # Step 4: Generate rolling summary & update chapter_context.json
     novel_title = meta.get("title", project_id)
@@ -1601,11 +1753,15 @@ def batch_translate_chapters(project_id, chapter_list):
 
 
 
-def _quality_scan(translated_text, reference, filename):
-    """Scan hasil terjemahan: CJK tersisa + spot-check reference terms."""
+def _quality_scan(translated_text, reference, filename, raw_text=""):
+    """Scan hasil terjemahan: CJK tersisa + term compliance. Returns quality dict."""
     import re
+
+    # --- CJK cleanliness (50 pts) ---
     cjk = re.findall(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+', translated_text)
     unique_cjk = list(set(cjk))
+    cjk_score = max(0, 50 - len(unique_cjk) * 5)
+
     if unique_cjk:
         snippets = ", ".join(f'"{c}"' for c in unique_cjk[:8])
         print(f"\n  [QC] ⚠ {len(unique_cjk)} CJK term(s) remaining: {snippets}")
@@ -1614,6 +1770,54 @@ def _quality_scan(translated_text, reference, filename):
         print(f"       Consider retranslating or use [Y] Sync Reference.")
     else:
         print(f"\n  [QC] ✓ No CJK characters remaining.")
+
+    # --- Term compliance (50 pts): check ref values appear in translation ---
+    all_terms = {}
+    for section in ("characters", "locations", "terms"):
+        all_terms.update(reference.get(section) or {})
+    # Also add character profile romanized names
+    for p in (reference.get("character_profiles") or []):
+        rn = p.get("romanized_name", "")
+        if rn:
+            all_terms[p.get("name", rn)] = rn
+
+    found = 0
+    if all_terms:
+        import re as _re
+        # Only check terms whose original key appears in the raw text of this chapter.
+        # This prevents reference growth from inflating the denominator unfairly.
+        if raw_text:
+            relevant_terms = {k: v for k, v in all_terms.items() if str(k) in raw_text}
+        else:
+            relevant_terms = all_terms
+
+        if not relevant_terms:
+            compliance_pct = 100
+            term_score = 50
+        else:
+            txt_lower = translated_text.lower()
+            for val in relevant_terms.values():
+                m = _re.search(r'\(([^)]+)\)', str(val))
+                check_val = m.group(1).strip() if m else str(val)
+                if check_val.lower() in txt_lower:
+                    found += 1
+            compliance_pct = int(found / len(relevant_terms) * 100)
+            term_score = int(compliance_pct / 2)  # 0–50
+            print(f"  [QC] Term compliance: {found}/{len(relevant_terms)} ({compliance_pct}%)")
+    else:
+        compliance_pct = 100
+        term_score = 50
+
+    total_score = cjk_score + term_score
+    grade = "A" if total_score >= 90 else "B" if total_score >= 75 else "C" if total_score >= 60 else "D"
+    print(f"  [QC] Quality score  : {total_score}/100  [{grade}]")
+
+    return {
+        "score": total_score,
+        "grade": grade,
+        "cjk_remaining": len(unique_cjk),
+        "term_compliance_pct": compliance_pct,
+    }
 
 
 def retranslate_chapter(project_id):
@@ -1758,6 +1962,53 @@ def _show_stats(project_id):
             print(f"    {cnt:>3}x  {lbl}")
     else:
         print("  Engine breakdown: no log data yet")
+
+    # Actual performance from stats (gemini_only vs mixed_fallback vs ollama_only)
+    perf_counts = {}
+    ollama_models_used = set()
+    total_chunks_gemini = total_chunks_ollama = total_chunks_failed = 0
+    for e in log.values():
+        p = e.get("actual_performance")
+        if p:
+            perf_counts[p] = perf_counts.get(p, 0) + 1
+        total_chunks_gemini  += e.get("chunks_gemini", 0)
+        total_chunks_ollama  += e.get("chunks_ollama", 0)
+        total_chunks_failed  += e.get("chunks_failed", 0)
+        if e.get("ollama_model_used"):
+            ollama_models_used.add(e["ollama_model_used"])
+    if perf_counts:
+        perf_labels = {"gemini_only": "Gemini only", "ollama_only": "Ollama only",
+                       "mixed_fallback": "Mixed (Gemini+Ollama fallback)", "failed": "Failed"}
+        print("  Actual performance:")
+        for k, cnt in sorted(perf_counts.items(), key=lambda x: -x[1]):
+            print(f"    {cnt:>3}x  {perf_labels.get(k, k)}")
+        total_chunks = total_chunks_gemini + total_chunks_ollama + total_chunks_failed
+        if total_chunks:
+            print(f"  Chunk breakdown: Gemini {total_chunks_gemini} | Ollama {total_chunks_ollama} | Failed {total_chunks_failed} / {total_chunks} total")
+        if ollama_models_used:
+            print(f"  Ollama model(s) used: {', '.join(sorted(ollama_models_used))}")
+    # Quality score summary from log
+    scores = [e["quality_score"] for e in log.values() if e.get("quality_score") is not None]
+    grade_counts = {}
+    for e in log.values():
+        g = e.get("quality_grade")
+        if g:
+            grade_counts[g] = grade_counts.get(g, 0) + 1
+
+    print()
+    if scores:
+        avg_score = int(sum(scores) / len(scores))
+        min_score = min(scores)
+        max_score = max(scores)
+        avg_grade = "A" if avg_score >= 90 else "B" if avg_score >= 75 else "C" if avg_score >= 60 else "D"
+        grade_bar = "  ".join(f"{g}:{grade_counts.get(g,0)}" for g in ("A","B","C","D") if grade_counts.get(g))
+        avg_comply = [e["term_compliance_pct"] for e in log.values() if e.get("term_compliance_pct") is not None]
+        avg_comply_str = f"{int(sum(avg_comply)/len(avg_comply))}%" if avg_comply else "n/a"
+        print(f"  Quality (avg)   : {avg_score}/100  [{avg_grade}]  (min {min_score} / max {max_score})")
+        print(f"  Grade breakdown : {grade_bar}")
+        print(f"  Term compliance : {avg_comply_str} avg")
+    else:
+        print("  Quality scores  : no data yet (translate a chapter to record)")
     print()
     if last_ch:
         print(f"  Last translated : {last_ch}  ({last_ts})")
@@ -1769,8 +2020,8 @@ def _show_stats(project_id):
     input("Press Enter to go back...")
 
 
-def _save_translation_log(project_id, filename, engine_mode, engine_label):
-    """Catat engine yang dipakai untuk setiap chapter ke translation_log.json."""
+def _save_translation_log(project_id, filename, engine_mode, engine_label, quality=None, stats=None):
+    """Catat engine + model calls + quality score per chapter ke translation_log.json."""
     import json
     from datetime import datetime
     log_path = os.path.join(pm.MANUAL_DIR, project_id, "translation_log.json")
@@ -1783,11 +2034,36 @@ def _save_translation_log(project_id, filename, engine_mode, engine_label):
         "engine_label": engine_label,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
-    # Catat model NLLB jika pakai NLLB
     if engine_mode.startswith("nllb"):
         nllb_marker = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".nllb")
         if os.path.exists(nllb_marker):
             entry["nllb_model"] = open(nllb_marker).read().strip()
+    if stats:
+        chunks_total = stats.get("gemini", 0) + stats.get("ollama", 0) + stats.get("nllb", 0) + stats.get("failed", 0)
+        entry["chunks_total"]    = chunks_total
+        entry["chunks_gemini"]   = stats.get("gemini", 0)
+        entry["chunks_ollama"]   = stats.get("ollama", 0)
+        entry["chunks_failed"]   = stats.get("failed", 0)
+        entry["chunks_censored"] = stats.get("censored", 0)
+        if stats.get("ollama_model"):
+            entry["ollama_model_used"] = stats["ollama_model"]
+        # Performance label: gemini_only, ollama_only, mixed, failed
+        g, o, f = stats.get("gemini", 0), stats.get("ollama", 0), stats.get("failed", 0)
+        if f == chunks_total:
+            entry["actual_performance"] = "failed"
+        elif g > 0 and o == 0:
+            entry["actual_performance"] = "gemini_only"
+        elif o > 0 and g == 0:
+            entry["actual_performance"] = "ollama_only"
+        elif g > 0 and o > 0:
+            entry["actual_performance"] = "mixed_fallback"
+        else:
+            entry["actual_performance"] = "unknown"
+    if quality:
+        entry["quality_score"]       = quality.get("score")
+        entry["quality_grade"]       = quality.get("grade")
+        entry["cjk_remaining"]       = quality.get("cjk_remaining")
+        entry["term_compliance_pct"] = quality.get("term_compliance_pct")
     log[filename] = entry
     with open(log_path, 'w', encoding='utf-8') as f:
         json.dump(log, f, ensure_ascii=False, indent=2)

@@ -75,8 +75,25 @@ function chapterLabel(filename) {
           v-for="novel in novels"
           :key="novel.id"
           @click="router.push(`/novel/${novel.id}`)"
-          class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 cursor-pointer hover:border-violet-400 dark:hover:border-violet-500 hover:shadow-md transition-all flex flex-col"
+          class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-violet-400 dark:hover:border-violet-500 hover:shadow-md transition-all flex flex-col overflow-hidden"
         >
+          <!-- Cover image -->
+          <div class="w-full h-40 bg-gray-100 dark:bg-gray-700 shrink-0 overflow-hidden">
+            <img
+              v-if="novel.has_cover"
+              :src="`/api/novels/${novel.id}/cover`"
+              :alt="novel.title_translated || novel.title"
+              class="w-full h-full object-cover"
+            />
+            <div v-else class="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600">
+              <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+              </svg>
+            </div>
+          </div>
+
+          <div class="p-5 flex flex-col flex-1">
           <div class="flex items-start justify-between gap-2 mb-2">
             <div class="leading-snug">
               <h2 class="font-semibold text-gray-900 dark:text-gray-100">{{ novel.title_translated || novel.title }}</h2>
@@ -105,6 +122,7 @@ function chapterLabel(filename) {
             </svg>
             Continue: {{ chapterLabel(progress[novel.id]) }}
           </div>
+          </div><!-- /p-5 inner -->
         </div>
       </div>
     </main>

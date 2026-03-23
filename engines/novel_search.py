@@ -337,8 +337,10 @@ def _display_results(page_results, page_num, total_pages, total_count, user_prom
     if page_num > 1:
         nav.append("B=Back")
     nav.append("1-10=Select")
+    nav.append("S=New Search")
     nav.append("Q=Quit")
-    print(f"\n  Navigation: {' | '.join(nav)}")
+    print(f"  Language: {target_lang} | Found: {total_count} novels | Page {page_num}/{total_pages}")
+    print(f"  Navigation: {' | '.join(nav)}")
 
 
 # ------------------------------------------------------------------
@@ -424,6 +426,7 @@ def _scaffold_project(novel_info, details, target_lang="Indonesian"):
     translated_dir = os.path.join(project_dir, "chapters", "translated")
     os.makedirs(raw_dir, exist_ok=True)
     os.makedirs(translated_dir, exist_ok=True)
+    os.makedirs(os.path.join(project_dir, "covers"), exist_ok=True)
 
     # metadata.json
     metadata = {
@@ -458,33 +461,11 @@ def _scaffold_project(novel_info, details, target_lang="Indonesian"):
     chapters = details.get("chapters", [])
     chapter_count = len(chapters) or details.get("chapter_count", 0)
 
-    if not chapter_count:
-        print(f"\n  [!] Could not fetch chapter list automatically.")
-        print(f"  How many empty chapter files to create? (Enter = skip):")
-        raw_count = input("  > ").strip()
-        if raw_count.isdigit() and int(raw_count) > 0:
-            chapter_count = int(raw_count)
-        else:
-            chapter_count = 0
-
-    created_files = 0
-    for idx in range(chapter_count):
-        filename = f"chapter_{idx + 1:03d}.txt"
-        filepath = os.path.join(raw_dir, filename)
-        if not os.path.exists(filepath):
-            with open(filepath, "w", encoding="utf-8") as f:
-                if idx < len(chapters):
-                    ch = chapters[idx]
-                    f.write(f"# SOURCE: {ch.get('url', '')}\n")
-                    f.write(f"# TITLE: {ch.get('title', '')}\n")
-                    f.write(f"# Delete the # lines above, then paste the chapter content here\n\n")
-            created_files += 1
-
     return {
         "project_dir": project_dir,
         "project_name": project_name,
         "chapter_count": chapter_count,
-        "created_files": created_files,
+        "created_files": 0,
     }
 
 
@@ -695,85 +676,100 @@ def search_novel_menu(manager):
         exclude_tags = settings["search"].get("exclude_tags", [])
         exclude_keywords = settings["search"].get("exclude_keywords", [])
         user_prompt = input("  Search criteria: ").strip()
+
+    while True:  # outer loop — allows re-search without going back to main menu
         if not user_prompt:
             return
 
-    print()
+        print()
 
-    # Collect novels from all sites
-    all_novels = []
-    for site_name in sites:
-        scraper = manager.get_scraper_by_name(site_name)
-        if not scraper:
-            print(f"  [!] Could not load scraper for '{site_name}'.")
-            continue
-        print(f"  [{site_name}] Fetching novel list...")
-        novels = _collect_novels_from_site(scraper, site_name, max_pages=2)
-        site_lang = manager._site_configs.get(site_name, {}).get("source_language", "Chinese")
-        for n in novels:
-            n["site_source_lang"] = site_lang
-        all_novels.extend(novels)
-        print(f"  [{site_name}] Total: {len(novels)} novels collected")
+        # Collect novels from all sites
+        all_novels = []
+        for site_name in sites:
+            scraper = manager.get_scraper_by_name(site_name)
+            if not scraper:
+                print(f"  [!] Could not load scraper for '{site_name}'.")
+                continue
+            print(f"  [{site_name}] Fetching novel list...")
+            novels = _collect_novels_from_site(scraper, site_name, max_pages=2)
+            site_lang = manager._site_configs.get(site_name, {}).get("source_language", "Chinese")
+            for n in novels:
+                n["site_source_lang"] = site_lang
+            all_novels.extend(novels)
+            print(f"  [{site_name}] Total: {len(novels)} novels collected")
 
-    if not all_novels:
-        print("\n  [!] No novels could be fetched from any site.")
-        input("\n  Press Enter to return...")
-        return
+        if not all_novels:
+            print("\n  [!] No novels could be fetched from any site.")
+            input("\n  Press Enter to return...")
+            return
 
-    print(f"\n  Total {len(all_novels)} novels from all sites. Filtering with AI...")
+        print(f"\n  Total {len(all_novels)} novels from all sites. Filtering with AI...")
 
-    results = _filter_and_translate_with_gemini(all_novels, user_prompt, target_lang,
-                                                exclude_tags=exclude_tags,
-                                                exclude_keywords=exclude_keywords)
+        results = _filter_and_translate_with_gemini(all_novels, user_prompt, target_lang,
+                                                    exclude_tags=exclude_tags,
+                                                    exclude_keywords=exclude_keywords)
 
-    if not results:
-        print("  [!] No novels matched the search criteria.")
-        input("\n  Press Enter to return...")
-        return
+        if not results:
+            print("  [!] No novels matched the search criteria.")
+            new_prompt = input("  Try a different search (Enter to quit): ").strip()
+            if new_prompt:
+                user_prompt = new_prompt
+                continue
+            return
 
-    # Save all results to cache; enrichment will happen lazily per page
-    cache = {
-        "query": user_prompt,
-        "target_lang": target_lang,
-        "timestamp": datetime.now().isoformat(),
-        "total": len(results),
-        "results": results,
-        "enriched_pages": [],
-    }
-    _save_search_cache(results, user_prompt, target_lang)
+        # Save all results to cache; enrichment will happen lazily per page
+        cache = {
+            "query": user_prompt,
+            "target_lang": target_lang,
+            "timestamp": datetime.now().isoformat(),
+            "total": len(results),
+            "results": results,
+            "enriched_pages": [],
+        }
+        _save_search_cache(results, user_prompt, target_lang)
 
-    total_pages = (len(results) + PAGE_SIZE - 1) // PAGE_SIZE
-    page_idx = 0  # 0-based internally
+        total_pages = (len(results) + PAGE_SIZE - 1) // PAGE_SIZE
+        page_idx = 0
 
-    while True:
-        # Lazy enrichment for current page
-        _enrich_page_if_needed(cache, page_idx, manager)
+        new_search = False
+        while True:
+            _enrich_page_if_needed(cache, page_idx, manager)
 
-        start = page_idx * PAGE_SIZE
-        page_novels = cache["results"][start:start + PAGE_SIZE]
-        page_num = page_idx + 1
+            start = page_idx * PAGE_SIZE
+            page_novels = cache["results"][start:start + PAGE_SIZE]
+            page_num = page_idx + 1
 
-        _display_results(page_novels, page_num, total_pages, cache["total"], user_prompt, target_lang)
+            _display_results(page_novels, page_num, total_pages, cache["total"], user_prompt, target_lang)
 
-        raw = input("  > ").strip().upper()
+            raw = input("  > ").strip().upper()
 
-        if raw == "Q" or raw == "":
-            break
-        elif raw == "N":
-            if page_idx < total_pages - 1:
-                page_idx += 1
-            else:
-                print("  [!] Already on the last page.")
-        elif raw == "B":
-            if page_idx > 0:
-                page_idx -= 1
-            else:
-                print("  [!] Already on the first page.")
-        elif raw.isdigit():
-            keep_going = _handle_novel_selection(raw, page_idx, cache, manager, target_lang)
-            if not keep_going:
+            if raw == "Q" or raw == "":
                 break
-        else:
-            print("  [!] Unknown command. Use N, B, 1-10, or Q.")
+            elif raw == "S":
+                new_prompt = input("  New search criteria: ").strip()
+                if new_prompt:
+                    user_prompt = new_prompt
+                    new_search = True
+                    break
+            elif raw == "N":
+                if page_idx < total_pages - 1:
+                    page_idx += 1
+                else:
+                    print("  [!] Already on the last page.")
+            elif raw == "B":
+                if page_idx > 0:
+                    page_idx -= 1
+                else:
+                    print("  [!] Already on the first page.")
+            elif raw.isdigit():
+                keep_going = _handle_novel_selection(raw, page_idx, cache, manager, target_lang)
+                if not keep_going:
+                    break
+            else:
+                print("  [!] Unknown command. Use N, B, S, 1-10, or Q.")
+
+        if new_search:
+            continue
+        break
 
     input("\n  Press Enter to return to menu...")

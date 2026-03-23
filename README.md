@@ -13,13 +13,16 @@ A tool for translating web novels (Chinese/Japanese/Korean) with context awarene
 - **Crash recovery**: Progress saved to `temp/` inside each project folder — portable across machines
 - **Explicit content support**: Professional translator role prompt for adult fiction
 - **Website scraper**: Auto-explore and analyze novel websites, generate site configs; SPA sites (Vue/React `#/` routing) auto-detected and rendered via Playwright
-- **Add Raw Chapter**: Input chapter URL → auto-fetch → save to raw/; loops for next URL automatically (Enter to exit); unknown mirror auto-detected from project metadata
+- **Add Raw Chapter**: Input chapter URL → auto-fetch → save to raw/; sequential URL pattern auto-detected from existing URL log — if pattern found, offers next batch directly (Enter to continue, or type a different URL); unknown mirror auto-detected from project metadata
+- **URL log**: `url_log.json` tracks every added chapter URL per project; warns and skips if the same URL is added again
+- **Duplicate content detection**: Before each translation, raw chapter content is scanned in memory for duplicated text (copy-paste artifacts); duplicate half is silently stripped before sending to the model — raw file is never modified
 - **Duplicate detection**: Project menu auto-detects raw chapters with identical content and flags them with `[!!]`
 - **Re-translate chapter**: Pick any translated chapter and re-translate it with the latest reference; supports single or batch selection (range `1-5`, list `1,3,5`, or combination `1-3,7`), engine chosen once for the whole batch
-- **Translation stats** `[D]`: Per-project dashboard — progress bar, translated/pending counts, engine breakdown from translation log, last translated chapter timestamp, total and average character counts
+- **Translation stats** `[D]`: Per-project dashboard — progress bar, translated/pending counts, engine breakdown, actual performance (gemini_only / ollama_only / mixed_fallback), Ollama models used, quality scores (avg/min/max), last translated chapter, total and average character counts
+- **Quality scores**: After each translation, automatically scores the result — CJK cleanliness (0–50 pts) + term compliance against only the terms relevant to that chapter (0–50 pts); graded A/B/C/D; saved to `translation_log.json`
 - **Auto chapter count**: Chapter count in metadata auto-updates when raw chapter files exceed the recorded total — no manual `[U]` needed
-- **Quality scan**: After each translation, automatically checks for remaining CJK characters and warns if any are found
-- **Translation log**: `translation_log.json` records which engine was used for each chapter, with timestamp and NLLB model info if applicable
+- **Translation log**: `translation_log.json` records engine, timestamp, chunk breakdown (total/gemini/ollama/failed/censored), `ollama_model_used`, `actual_performance`, and quality score per chapter
+- **Cover images**: Place an image (`jpg`, `jpeg`, `png`, or `webp`) inside a project's `covers/` folder — the web reader shows it on the novel card and detail page; novels without a cover show a blank placeholder
 - **Pinyin annotations toggle** `[P]`: Per-project toggle — ON adds romanized annotations on first occurrence of new terms; OFF strips pinyin from reference values and instructs the model to translate cultural terms directly, while still preserving proper nouns listed in reference
 - **Term enforcement**: High-priority block injected at the end of every translation prompt listing key terms with mandatory verbatim usage
 - **Continuity check**: Scan all translated chapters for character name inconsistencies (fuzzy match vs `character_profiles`); indexed by `character_appearances.json` to reduce false positives — only characters known to appear in a chapter are checked against it
@@ -86,8 +89,10 @@ novel-translator/
         ├── character_appearances.json # Per-chapter index of which characters appear (continuity check)
         ├── translation_guide.json     # Style guide (English, auto-generated)
         ├── chapter_context.json       # Rolling chapter summaries (capped at 5 entries, 350 chars each)
-        ├── translation_log.json       # Per-chapter engine log (engine, timestamp, nllb_model)
+        ├── translation_log.json       # Per-chapter engine log with quality scores and chunk stats
+        ├── url_log.json               # Per-chapter URL log (prevents duplicate adds)
         ├── sync_log.txt               # Append-only log of all Sync Reference runs
+        ├── covers/                    # Cover images (jpg/jpeg/png/webp); served by web reader
         ├── temp/                      # Crash recovery (gitignored, portable with project)
         │   └── translate_progress.json
         └── chapters/
@@ -116,8 +121,10 @@ Research re-run includes already-translated chapters as consistency reference �
 
 1. Menu → **Add Website**
 2. Enter the homepage URL
-3. Program auto-explores: homepage → listing → novel detail → chapter
-4. Gemini generates a JSON config, saved to `config/sites/`
+3. *(Optional)* Enter login URL + credentials — program logs in via Playwright and saves cookies for subsequent scraping; credentials saved to `config/credentials.json` (gitignored)
+4. Enter listing page URLs one by one (Enter with no input to finish)
+5. Enter one detail/chapter page URL for structure analysis
+6. Gemini generates a JSON config, saved to `config/sites/`
 
 ## Web Reader
 
@@ -143,6 +150,7 @@ npm run dev
 The frontend proxies `/api` to `localhost:8000`. Displays translated novels with `title_translated` (target language title) when available, falling back to the original title.
 
 Reader features:
+- Cover image on novel cards and detail page (from `covers/` folder); blank placeholder if no cover
 - Collapsible sidebar (left) listing all chapters, current chapter highlighted
 - Dark mode toggle — respects system preference on first load, saved to localStorage
 - Font size controls (`A−` / `A+`) in chapter header, saved to localStorage

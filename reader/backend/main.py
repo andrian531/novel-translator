@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 app = FastAPI(title="Novel Reader API")
 
@@ -29,6 +30,17 @@ def _load_json(path: Path) -> dict:
             return json.load(f)
     except Exception:
         return {}
+
+
+def _find_cover(project_id: str) -> Path | None:
+    covers_dir = PROJECTS_DIR / project_id / "covers"
+    if not covers_dir.exists():
+        return None
+    for ext in ("jpg", "jpeg", "png", "webp"):
+        matches = list(covers_dir.glob(f"*.{ext}"))
+        if matches:
+            return matches[0]
+    return None
 
 
 def _list_translated(project_id: str) -> list[str]:
@@ -64,6 +76,7 @@ def list_novels():
             "synopsis": meta.get("synopsis", ""),
             "translated_count": len(translated),
             "total_chapters": meta.get("total_chapters", 0),
+            "has_cover": _find_cover(item.name) is not None,
         })
     return novels
 
@@ -89,6 +102,7 @@ def get_novel(project_id: str):
         "synopsis": meta.get("synopsis", ""),
         "total_chapters": meta.get("total_chapters", 0),
         "chapters": translated,
+        "has_cover": _find_cover(project_id) is not None,
     }
 
 
@@ -127,3 +141,12 @@ def get_chapter(project_id: str, filename: str):
         "index": idx + 1,
         "total": len(all_chapters),
     }
+
+
+@app.get("/api/novels/{project_id}/cover")
+def get_cover(project_id: str):
+    """Serve cover image from covers/ folder."""
+    cover = _find_cover(project_id)
+    if not cover:
+        raise HTTPException(status_code=404, detail="No cover")
+    return FileResponse(cover)

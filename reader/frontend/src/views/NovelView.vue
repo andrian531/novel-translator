@@ -67,6 +67,23 @@ function chapterLabel(filename) {
       <template v-else-if="novel">
         <!-- Novel info -->
         <div class="mb-8">
+          <!-- Cover image -->
+          <div class="mb-6 flex justify-center">
+            <div class="w-36 h-52 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 shadow-md shrink-0">
+              <img
+                v-if="novel.has_cover"
+                :src="`/api/novels/${novel.id}/cover`"
+                :alt="novel.title_translated || novel.title"
+                class="w-full h-full object-cover"
+              />
+              <div v-else class="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600">
+                <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                    d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                </svg>
+              </div>
+            </div>
+          </div>
           <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-0.5">{{ novel.title_translated || novel.title }}</h1>
           <p v-if="novel.title_translated && novel.title_translated !== novel.title" class="text-sm text-gray-400 dark:text-gray-500 mb-1">{{ novel.title }}</p>
           <p v-if="novel.author" class="text-gray-500 dark:text-gray-400 mb-3">{{ novel.author }}</p>

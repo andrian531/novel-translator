@@ -343,7 +343,8 @@ class GenericScraper(BaseScraper):
             return []
 
         enc = self.encoding if self.encoding != "auto" else "utf-8"
-        soup = BeautifulSoup(html, "html.parser", from_encoding=enc if enc != "utf-8" else None)
+        _fe = (enc if enc != "utf-8" else None) if isinstance(html, bytes) else None
+        soup = BeautifulSoup(html, "html.parser", from_encoding=_fe)
 
         listing_sel = self.sel.get("novel_listing", [])
         items = self._select_first(soup, listing_sel)
@@ -415,7 +416,8 @@ class GenericScraper(BaseScraper):
             return {}
 
         enc = self.encoding if self.encoding != "auto" else "utf-8"
-        soup = BeautifulSoup(html, "html.parser", from_encoding=enc if enc != "utf-8" else None)
+        _fe = (enc if enc != "utf-8" else None) if isinstance(html, bytes) else None
+        soup = BeautifulSoup(html, "html.parser", from_encoding=_fe)
 
         # Judul
         title_el = self._select_one_first(soup, self.sel.get("novel_title", ["h1"]))
