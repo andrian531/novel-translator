@@ -502,6 +502,85 @@ def _parse_json_from_text(text):
     return None
 
 
+def _gemini_suggest_listing_urls(structure: dict, base_domain: str) -> list:
+    """Ask Gemini to identify listing/ranking/category page URLs from homepage structure."""
+    links = structure.get("sample_links", [])[:30]
+    patterns = structure.get("top_path_patterns", [])[:8]
+    candidates = structure.get("list_candidates", [])[:4]
+    prompt = (
+        f"You are analyzing a novel website homepage to find listing/ranking/category pages.\n"
+        f"Base domain: {base_domain}\n"
+        f"Homepage URL: {structure.get('url', '')}\n"
+        f"Sample internal links found:\n" + "\n".join(f"  {base_domain}{l}" if l.startswith("/") else f"  {l}" for l in links) + "\n"
+        f"Most common path patterns: {json.dumps(patterns)}\n"
+        f"List area samples: {json.dumps([c.get('item_example','')[:60] for c in candidates])}\n\n"
+        f"Identify up to 5 URLs that are likely ranking, genre, category, or listing pages "
+        f"(pages that show a list of novels — NOT a single novel detail page, NOT a chapter page).\n"
+        f"Return ONLY a JSON array of full URL strings. Example: [\"https://example.com/rank/\", \"https://example.com/genre/xuanhuan/\"]\n"
+        f"If none found, return []."
+    )
+    raw = _run_gemini(prompt, timeout=60)
+    if not raw:
+        return []
+    # Extract JSON array from response
+    m = re.search(r'\[[\s\S]*?\]', raw)
+    if m:
+        try:
+            urls = json.loads(m.group())
+            return [u for u in urls if isinstance(u, str) and u.startswith("http")][:5]
+        except Exception:
+            pass
+    return []
+
+
+def _gemini_suggest_novel_url(structure: dict, base_domain: str) -> str:
+    """Ask Gemini to identify a novel detail page URL from a listing page structure."""
+    links = structure.get("sample_links", [])[:30]
+    candidates = structure.get("list_candidates", [])[:3]
+    item_html = candidates[0].get("item_html_sample", "") if candidates else ""
+    prompt = (
+        f"You are analyzing a novel listing/category page to find a novel detail page.\n"
+        f"Listing page URL: {structure.get('url', '')}\n"
+        f"Sample internal links:\n" + "\n".join(f"  {base_domain}{l}" if l.startswith("/") else f"  {l}" for l in links[:20]) + "\n"
+        f"First list item HTML: {item_html[:300]}\n\n"
+        f"Identify ONE URL that is a novel detail/info page "
+        f"(the page that shows a novel's title, synopsis, and chapter list).\n"
+        f"Return ONLY the full URL as a plain string, nothing else. If none found, return empty string."
+    )
+    raw = _run_gemini(prompt, timeout=60)
+    if not raw:
+        return ""
+    # Extract first URL-like string
+    m = re.search(r'https?://\S+', raw.strip())
+    if m:
+        url = m.group().rstrip('.,)"\'')
+        return url
+    return ""
+
+
+def _gemini_suggest_chapter_url(structure: dict, base_domain: str) -> str:
+    """Ask Gemini to identify a chapter page URL from a novel detail page structure."""
+    links = structure.get("sample_links", [])[:30]
+    candidates = structure.get("list_candidates", [])[:3]
+    item_html = candidates[0].get("item_html_sample", "") if candidates else ""
+    prompt = (
+        f"You are analyzing a novel detail page to find a chapter page.\n"
+        f"Novel detail page URL: {structure.get('url', '')}\n"
+        f"Sample internal links:\n" + "\n".join(f"  {base_domain}{l}" if l.startswith("/") else f"  {l}" for l in links[:20]) + "\n"
+        f"Chapter list area HTML sample: {item_html[:300]}\n\n"
+        f"Identify ONE URL that is a chapter page (a page containing the actual novel text/story content).\n"
+        f"Return ONLY the full URL as a plain string, nothing else. If none found, return empty string."
+    )
+    raw = _run_gemini(prompt, timeout=60)
+    if not raw:
+        return ""
+    m = re.search(r'https?://\S+', raw.strip())
+    if m:
+        url = m.group().rstrip('.,)"\'')
+        return url
+    return ""
+
+
 def _ask_gemini_analyze(structure: dict, source_lang: str, page_type: str,
                         existing_config: dict = None):
     """Send multi-page structure summary to Gemini, request JSON scraper config.
@@ -809,16 +888,62 @@ def analyze_website(manager=None):
         print(f"  [~] Search form not detected")
     all_structures["search_info"] = search_info
 
-    # ── Step 2: Category/listing pages (user-provided) ───────────
+    # ── Step 2: Category/listing pages (Gemini-suggested + user override) ──
     print(f"\n  [2/4] Listing/category pages")
-    print(f"  Paste listing page URLs one by one (e.g. ranking, genre, category pages).")
-    print(f"  Press Enter with no input when done.")
     listing_soup = None
     listing_idx = 0
+
+    # Ask Gemini to suggest listing URLs from homepage structure
+    print(f"  [Gemini] Analyzing homepage to suggest listing pages...")
+    suggested_listing = _gemini_suggest_listing_urls(all_structures["homepage"], base_domain)
+    if suggested_listing:
+        print(f"  [Gemini] Suggested listing URLs:")
+        for i, u in enumerate(suggested_listing, 1):
+            print(f"    {i}. {u}")
+        use_suggested = input("  Use these? (Y=all / n=manual input / 1,2=pick numbers): ").strip().lower()
+        if use_suggested == "" or use_suggested == "y":
+            urls_to_fetch = suggested_listing
+        elif use_suggested == "n":
+            urls_to_fetch = []
+        else:
+            # pick specific numbers
+            try:
+                picks = [int(x.strip()) - 1 for x in use_suggested.split(",") if x.strip().isdigit()]
+                urls_to_fetch = [suggested_listing[i] for i in picks if 0 <= i < len(suggested_listing)]
+            except Exception:
+                urls_to_fetch = suggested_listing
+        # Fetch confirmed suggestions
+        for cat_url in urls_to_fetch:
+            listing_idx += 1
+            print(f"  [+] Opening: {cat_url}")
+            cat_html, cat_final = _fetch_with_playwright(cat_url, wait_seconds=2, cookies=session_cookies)
+            if not cat_html:
+                print(f"  [!] Failed to load.")
+                listing_idx -= 1
+                continue
+            cat_soup_tmp = BeautifulSoup(cat_html, "html.parser")
+            cat_structure = _extract_structure(cat_html, cat_final)
+            key = "category_listing_page" if listing_idx == 1 else f"category_listing_page_{listing_idx}"
+            all_structures[key] = {
+                "url": cat_final,
+                "list_candidates": cat_structure["list_candidates"],
+                "headings": cat_structure["headings"][:3],
+                "sample_links": cat_structure["sample_links"][:10],
+            }
+            item_counts = [c["item_count"] for c in cat_structure["list_candidates"]]
+            print(f"  [OK] Listing page added — {len(cat_structure['list_candidates'])} list area(s), items: {item_counts}")
+            if listing_soup is None:
+                listing_soup = cat_soup_tmp
+    else:
+        print(f"  [~] Gemini could not suggest listing pages.")
+
+    # Always offer manual input to add more or override
+    print(f"  Add more listing URLs manually (Enter with no input to continue):")
     while True:
         listing_idx += 1
-        raw_cat = input(f"  Listing URL #{listing_idx} (Enter to skip/done): ").strip()
+        raw_cat = input(f"  Listing URL #{listing_idx} (Enter to done): ").strip()
         if not raw_cat:
+            listing_idx -= 1
             break
         cat_url = raw_cat if raw_cat.startswith("http") else base_domain + raw_cat
         print(f"  [+] Opening: {cat_url}")
@@ -840,16 +965,35 @@ def analyze_website(manager=None):
         print(f"  [OK] Listing page added — {len(cat_structure['list_candidates'])} list area(s), items: {item_counts}")
         if listing_soup is None:
             listing_soup = cat_soup_tmp
+
     if not listing_soup:
         print(f"  [~] No listing page provided — using homepage as fallback")
 
-    # ── Step 3: Novel detail page (user-provided) ─────────────────
+    # ── Step 3: Novel detail page (Gemini-suggested + user override) ──
     print(f"\n  [3/4] Novel detail page")
-    print(f"  Paste a URL of a specific novel's detail/info page.")
-    manual = input("  Novel detail URL (Enter to skip): ").strip()
     novel_url = None
-    if manual:
-        novel_url = manual if manual.startswith("http") else base_domain + manual
+
+    # Ask Gemini to suggest a novel detail URL from the first listing page
+    first_listing_key = "category_listing_page" if "category_listing_page" in all_structures else None
+    if first_listing_key:
+        print(f"  [Gemini] Analyzing listing page to suggest a novel detail URL...")
+        suggested_novel = _gemini_suggest_novel_url(all_structures[first_listing_key], base_domain)
+        if suggested_novel:
+            print(f"  [Gemini] Suggested novel detail URL: {suggested_novel}")
+            confirm = input("  Use this? (Y/n/paste different URL): ").strip()
+            if confirm == "" or confirm.lower() == "y":
+                novel_url = suggested_novel
+            elif confirm.lower() != "n" and confirm.startswith("http"):
+                novel_url = confirm
+            elif confirm.lower() == "n":
+                novel_url = None
+        else:
+            print(f"  [~] Gemini could not suggest a novel detail URL.")
+
+    if not novel_url:
+        manual = input("  Novel detail URL (Enter to skip): ").strip()
+        if manual:
+            novel_url = manual if manual.startswith("http") else base_domain + manual
 
     if novel_url:
         print(f"  [+] Opening novel: {novel_url}")
@@ -865,15 +1009,25 @@ def analyze_website(manager=None):
             }
             print(f"  [OK] Novel detail page analyzed")
 
-            # ── Step 4: Chapter page ──────────────────────────────
+            # ── Step 4: Chapter page (Gemini-suggested) ──────────
             print(f"\n  [4/4] Opening a chapter page...")
             ch_candidates = _detect_chapter_sample(nov_soup, nov_final)
             if not ch_candidates:
-                print(f"  [~] Could not auto-detect a chapter link.")
-                manual_ch = input("  Paste a chapter page URL manually (or Enter to skip): ").strip()
-                if manual_ch:
-                    ch_url = manual_ch if manual_ch.startswith("http") else base_domain + manual_ch
-                    ch_candidates = [{"url": ch_url}]
+                print(f"  [~] Regex could not detect chapter link — asking Gemini...")
+                suggested_ch = _gemini_suggest_chapter_url(nov_structure, base_domain)
+                if suggested_ch:
+                    print(f"  [Gemini] Suggested chapter URL: {suggested_ch}")
+                    confirm_ch = input("  Use this? (Y/n/paste different URL): ").strip()
+                    if confirm_ch == "" or confirm_ch.lower() == "y":
+                        ch_candidates = [{"url": suggested_ch}]
+                    elif confirm_ch.lower() != "n" and confirm_ch.startswith("http"):
+                        ch_candidates = [{"url": confirm_ch}]
+                else:
+                    print(f"  [~] Gemini could not suggest a chapter URL.")
+                    manual_ch = input("  Paste a chapter page URL manually (or Enter to skip): ").strip()
+                    if manual_ch:
+                        ch_url = manual_ch if manual_ch.startswith("http") else base_domain + manual_ch
+                        ch_candidates = [{"url": ch_url}]
             if ch_candidates:
                 ch_url = ch_candidates[0]["url"]
                 print(f"  [+] Opening chapter: {ch_url}")

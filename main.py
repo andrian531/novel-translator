@@ -1227,7 +1227,7 @@ def manual_research_project(project_id):
 
     # Simpan laporan lengkap
     raw_dir    = pm.get_raw_chapters_path(project_id)
-    report_dir = os.path.join(os.path.dirname(raw_dir), "research")
+    report_dir = os.path.join(os.path.dirname(os.path.dirname(raw_dir)), "research")
     os.makedirs(report_dir, exist_ok=True)
     report_file = os.path.join(report_dir, "project_research.txt")
     with open(report_file, "w", encoding="utf-8") as f:
@@ -2566,7 +2566,7 @@ def generate_alt_titles(project_id):
 
     # Save
     raw_dir    = pm.get_raw_chapters_path(project_id)
-    report_dir = os.path.join(os.path.dirname(raw_dir), "research")
+    report_dir = os.path.join(os.path.dirname(os.path.dirname(raw_dir)), "research")
     os.makedirs(report_dir, exist_ok=True)
     out_file = os.path.join(report_dir, "alternative_titles.txt")
     with open(out_file, "w", encoding="utf-8") as f:
@@ -2576,13 +2576,12 @@ def generate_alt_titles(project_id):
 
 
 def generate_image_prompt(project_id):
-    """Gemini generate prompt untuk membuat cover image (Midjourney/DALL-E/SD/Gemini Image/Grok)."""
+    """Gemini analyze novel → user picks visual concept → generate final image prompt."""
     clear_screen()
     meta     = pm.load_manual_metadata(project_id)
     title    = meta.get("title", "")
     src_lang = meta.get("source_lang", "Chinese")
     synopsis = meta.get("synopsis", "")
-    guide    = pm.load_translation_guide(project_id)
     ref      = pm.load_manual_reference(project_id)
 
     print("=" * 56)
@@ -2606,13 +2605,94 @@ def generate_image_prompt(project_id):
         "6": "General",
     }.get(plat_c, "Midjourney")
 
-    print(f"\n[*] Requesting Gemini to generate image prompt for {platform}...\n")
+    # Build compact novel context — prefer existing research report (already summarized)
+    raw_dir    = pm.get_raw_chapters_path(project_id)
+    research_dir = os.path.join(os.path.dirname(os.path.dirname(raw_dir)), "research")
+    research_file = os.path.join(research_dir, "project_research.txt")
+    if os.path.exists(research_file):
+        with open(research_file, encoding="utf-8") as f:
+            research_summary = f.read()[:1200]
+        novel_ctx = (
+            f"Novel: {title} ({src_lang} web novel)\n"
+            f"Research summary:\n{research_summary}"
+        )
+        print("  [*] Using existing research report as context.")
+    else:
+        # Fallback: synopsis + top 4 characters + top 3 locations (keep compact)
+        chars_detail = "; ".join(f"{k}" for k in list(ref.get("characters", {}).keys())[:4])
+        locs_detail  = ", ".join(list(ref.get("locations", {}).values())[:3])
+        novel_ctx = (
+            f"Novel: {title} ({src_lang} web novel)\n"
+            f"Synopsis: {synopsis[:400] if synopsis else '(not available)'}\n"
+            f"Main characters: {chars_detail or '(not available)'}\n"
+            f"Key locations: {locs_detail or '(not available)'}"
+        )
 
-    chars_detail = "\n".join(f"  {k}: {v}" for k, v in list(ref.get("characters", {}).items())[:5])
-    locs_detail  = ", ".join(list(ref.get("locations", {}).values())[:4])
-    guide_tone   = guide.get("guide_text", "")[:300]
+    # ── Step 1: Gemini proposes visual concepts ──────────────────────
+    print("\n[*] Analyzing novel to suggest visual concepts...\n")
+    concept_prompt = (
+        f"You are a book cover art director analyzing a novel to propose cover concepts.\n\n"
+        f"{novel_ctx}\n\n"
+        f"Propose exactly 5 distinct visual concepts for a novel cover image. "
+        f"Each concept must have a clearly different composition/theme. "
+        f"Consider variety such as: lone protagonist, male+female pair, group scene, "
+        f"landscape/setting focus, symbolic/abstract, action scene, atmospheric portrait, etc. "
+        f"Match concepts to the actual genre, tone, and setting of this novel.\n\n"
+        f"Format your response as a numbered list (1-5). "
+        f"For each concept write one concise line (max 20 words) describing the visual scene — "
+        f"no explanations, just the scene description. Example format:\n"
+        f"1. Young woman in cultivation robes standing on a misty mountain peak at dawn\n"
+        f"2. Male and female protagonists back-to-back in a neon-lit urban alley\n"
+        f"...\n\n"
+        f"Output ONLY the 5 numbered lines, nothing else."
+    )
+    concepts_raw = tr._run_gemini(concept_prompt, timeout=60)
+    if not concepts_raw:
+        print("[-] Gemini did not respond.")
+        input("Press Enter...")
+        return
 
-    # Platform-specific prompt guidance
+    # Parse concepts
+    concepts = []
+    for line in concepts_raw.strip().splitlines():
+        line = line.strip()
+        if line and line[0].isdigit():
+            # Strip leading "1. " or "1) "
+            parts = line.split(".", 1) if "." in line[:3] else line.split(")", 1)
+            if len(parts) == 2:
+                concepts.append(parts[1].strip())
+            else:
+                concepts.append(line)
+    if not concepts:
+        concepts = [concepts_raw.strip()]
+
+    clear_screen()
+    print("=" * 56)
+    print("  SELECT VISUAL CONCEPT")
+    print("=" * 56)
+    print(f"  Novel : {title}\n")
+    for i, c in enumerate(concepts, 1):
+        print(f"  {i}. {c}")
+    print(f"  C. Enter custom concept")
+    print()
+
+    while True:
+        choice = input("Pick concept [1]: ").strip().lower()
+        if choice == "" or choice == "1":
+            chosen_concept = concepts[0] if concepts else ""
+            break
+        elif choice == "c":
+            chosen_concept = input("  Describe your concept: ").strip()
+            break
+        elif choice.isdigit() and 1 <= int(choice) <= len(concepts):
+            chosen_concept = concepts[int(choice) - 1]
+            break
+        else:
+            print(f"  [!] Enter 1-{len(concepts)} or C.")
+
+    # ── Step 2: Generate final prompt for chosen concept ─────────────
+    print(f"\n[*] Generating {platform} prompt for: \"{chosen_concept}\"...\n")
+
     platform_hints = {
         "Midjourney": (
             "Format: concise English prompt with style modifiers separated by commas. "
@@ -2649,29 +2729,28 @@ def generate_image_prompt(project_id):
     }
     hint = platform_hints.get(platform, "")
 
-    prompt = (
+    gen_prompt = (
         f"You are an expert AI image prompt engineer for novel cover art.\n\n"
-        f"Novel: {title} ({src_lang} web novel)\n"
-        f"Synopsis: {synopsis or '(not available)'}\n"
-        f"Main characters:\n{chars_detail or '  (not available)'}\n"
-        f"Key locations: {locs_detail or '(not available)'}\n"
-        f"Story tone: {guide_tone or '(not available)'}\n\n"
-        f"Generate cover art prompts optimized for **{platform}**.\n"
+        f"{novel_ctx}\n\n"
+        f"Chosen visual concept: {chosen_concept}\n\n"
+        f"Generate a cover art prompt optimized for **{platform}** based on this concept.\n"
         f"Platform guidance: {hint}\n\n"
+        f"CRITICAL RULES:\n"
+        f"- Do NOT include any text, title, letters, words, watermark, or typography in the image prompt\n"
+        f"- The image must be purely visual — no text overlay of any kind\n\n"
         f"Provide:\n"
-        f"1. **MAIN PROMPT** — Full detailed prompt (English) for a stunning novel cover:\n"
-        f"   - Main character visual description (appearance, clothing, pose)\n"
+        f"1. **MAIN PROMPT** — Full detailed prompt (English):\n"
+        f"   - Character visual details (appearance, clothing, pose) if characters present\n"
         f"   - Background/setting atmosphere\n"
-        f"   - Art style (anime/manhwa/realistic/painterly — match the novel genre)\n"
+        f"   - Art style (anime/manhwa/realistic/painterly — match novel genre)\n"
         f"   - Lighting, color palette, mood\n"
         f"   - Technical format appropriate for {platform}\n\n"
-        f"2. **NEGATIVE PROMPT** (things to avoid — skip if platform doesn't use negative prompts)\n\n"
-        f"3. **ALTERNATIVE CONCEPT** — A second composition idea (different pose/scene)\n\n"
-        f"4. **STYLE TAGS** — 5-8 concise style keywords for quick iteration\n\n"
-        f"Write prompts in English (standard for image AI). Briefly explain design choices."
+        f"2. **NEGATIVE PROMPT** (skip if platform doesn't use negative prompts; always include: text, watermark, logo, title, letters, words)\n\n"
+        f"3. **STYLE TAGS** — 5-8 concise style keywords for quick iteration\n\n"
+        f"Write prompts in English. No title text in the image."
     )
 
-    result = tr._run_gemini(prompt, timeout=120)
+    result = tr._run_gemini(gen_prompt, timeout=120)
     if not result:
         print("[-] Gemini did not respond.")
         input("Press Enter...")
@@ -2680,16 +2759,19 @@ def generate_image_prompt(project_id):
     clear_screen()
     print("=" * 56)
     print(f"  IMAGE PROMPT — {platform}")
+    print(f"  Concept: {chosen_concept}")
     print("=" * 56)
     print(result)
 
     # Save
     raw_dir    = pm.get_raw_chapters_path(project_id)
-    report_dir = os.path.join(os.path.dirname(raw_dir), "research")
+    report_dir = os.path.join(os.path.dirname(os.path.dirname(raw_dir)), "research")
     os.makedirs(report_dir, exist_ok=True)
-    out_file = os.path.join(report_dir, f"image_prompt_{platform.lower().replace(' ','_')}.txt")
+    safe_concept = chosen_concept[:40].replace(" ", "_").replace("/", "-")
+    out_file = os.path.join(report_dir, f"image_prompt_{platform.lower().replace(' ','_')}_{safe_concept}.txt")
     with open(out_file, "w", encoding="utf-8") as f:
-        f.write(f"IMAGE PROMPT — {title} | Platform: {platform}\n{'='*56}\n\n{result}")
+        f.write(f"IMAGE PROMPT — {title} | Platform: {platform}\n"
+                f"Concept: {chosen_concept}\n{'='*56}\n\n{result}")
     print(f"\n[*] Saved: {out_file}")
     input("\nPress Enter...")
 
