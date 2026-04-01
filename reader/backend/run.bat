@@ -1,6 +1,16 @@
 @echo off
 cd /d "%~dp0"
 
+set "VENV_ACTIVATE=%~dp0..\..\venv\Scripts\activate.bat"
+
+if exist "%VENV_ACTIVATE%" (
+    call "%VENV_ACTIVATE%"
+) else (
+    echo [!] venv not found. Run install.bat from project root first.
+    pause
+    exit /b 1
+)
+
 pip install -r requirements.txt -q
 
 echo.

@@ -25,22 +25,51 @@ if errorlevel 1 (
 for /f "tokens=*" %%v in ('python --version 2^>^&1') do echo  [OK] %%v
 
 :: ============================================================
-:: STEP 2: Python packages (requests — core dependency)
+:: STEP 1b: Virtual environment (venv)
 :: ============================================================
 echo.
-echo [2/5] Checking Python packages...
+echo [venv] Setting up virtual environment...
+set "VENV_DIR=%SCRIPT_DIR%\venv"
 
-python -c "import requests" >nul 2>&1
-if errorlevel 1 (
-    echo  [!] requests not found. Installing...
-    pip install requests
+if exist "!VENV_DIR!\Scripts\activate.bat" (
+    echo  [OK] venv already exists — activating...
+) else (
+    echo  [+] Creating venv at: !VENV_DIR!
+    python -m venv "!VENV_DIR!"
     if errorlevel 1 (
-        echo  [ERROR] Failed to install requests.
+        echo  [ERROR] Failed to create venv.
         goto INSTALL_FAILED
     )
-    echo  [OK] requests installed
-) else (
-    echo  [OK] requests
+    echo  [OK] venv created
+)
+
+call "!VENV_DIR!\Scripts\activate.bat"
+echo  [OK] venv activated
+echo  [*] All packages will be installed inside: venv\
+
+:: ============================================================
+:: STEP 2: Python packages (from requirements.txt)
+:: ============================================================
+echo.
+echo [2/5] Installing Python packages (requirements.txt)...
+
+pip install -r "%SCRIPT_DIR%\requirements.txt"
+if errorlevel 1 (
+    echo  [ERROR] Failed to install required packages.
+    goto INSTALL_FAILED
+)
+echo  [OK] Core packages installed (requests, beautifulsoup4, playwright)
+
+:: Install Playwright browser binaries (Chromium)
+python -c "import playwright" >nul 2>&1
+if not errorlevel 1 (
+    echo  [+] Installing Playwright Chromium browser...
+    playwright install chromium
+    if errorlevel 1 (
+        echo  [WARN] Playwright browser install failed. Run manually: playwright install chromium
+    ) else (
+        echo  [OK] Playwright Chromium ready
+    )
 )
 
 :: ============================================================
@@ -248,21 +277,43 @@ echo  Used only when ALL Ollama models fail to translate a chunk.
 echo  Pure translation model — no context awareness.
 echo.
 
+:: Check current package status in venv
 set "NLLB_PKG_OK=false"
 python -c "import transformers, torch, sentencepiece" >nul 2>&1 && set "NLLB_PKG_OK=true"
 
+:: Check if NLLB model was previously downloaded (.nllb marker file)
+set "NLLB_PREV="
+if exist "%SCRIPT_DIR%\.nllb" (
+    for /f "usebackq tokens=*" %%N in ("%SCRIPT_DIR%\.nllb") do set "NLLB_PREV=%%N"
+)
+
 if "!NLLB_PKG_OK!"=="true" (
-    echo  [OK] NLLB packages already installed (transformers, torch, sentencepiece)
+    echo  [OK] NLLB packages ready in venv (transformers, torch, sentencepiece)
     goto NLLB_MODEL_CHECK
 )
 
-echo  Missing: one or more of: transformers, torch, sentencepiece
-echo.
-set /p INSTALL_NLLB="  Install NLLB packages? (Y/N, default=Y): "
-if /i "!INSTALL_NLLB!"=="N" (
-    echo  [INFO] Skipped. NLLB fallback will be disabled.
-    goto NLLB_DONE
+:: Packages missing from venv
+if "!NLLB_PREV!"=="" (
+    :: No previous NLLB — ask if user wants it at all
+    echo  Packages not installed: transformers, torch, sentencepiece
+    echo.
+    set /p INSTALL_NLLB="  Install NLLB packages into venv? (Y/N, default=N): "
+    if /i not "!INSTALL_NLLB!"=="Y" (
+        echo  [INFO] Skipped. NLLB fallback will be disabled.
+        goto NLLB_DONE
+    )
+) else (
+    :: Model already downloaded — packages just need to be reinstalled into venv
+    echo  [!] NLLB model (!NLLB_PREV!) was previously downloaded but packages are
+    echo      not yet installed in the new venv (transformers, torch, sentencepiece).
+    echo.
+    set /p INSTALL_NLLB="  Reinstall NLLB packages into venv? (Y/N, default=Y): "
+    if /i "!INSTALL_NLLB!"=="N" (
+        echo  [INFO] Skipped. NLLB fallback will be disabled until packages are installed.
+        goto NLLB_DONE
+    )
 )
+
 echo  Installing packages...
 pip install transformers sentencepiece
 if errorlevel 1 (
@@ -294,7 +345,7 @@ if errorlevel 1 (
 
 python -c "import transformers, torch, sentencepiece" >nul 2>&1 && set "NLLB_PKG_OK=true"
 if "!NLLB_PKG_OK!"=="true" (
-    echo  [OK] All NLLB packages verified
+    echo  [OK] All NLLB packages verified in venv
 ) else (
     echo  [WARN] Some packages still missing. NLLB fallback may not work.
 )
@@ -435,7 +486,10 @@ if exist "%SCRIPT_DIR%\.nllb" (
 echo  NLLB        : !NLLB_STATUS!
 
 echo.
-echo  Run the tool: python main.py   or   run.bat
+echo  venv        : !VENV_DIR!
+echo.
+echo  Run the tool: run.bat   (activates venv automatically)
+echo               or manually: venv\Scripts\activate  then  python main.py
 echo ============================================================
 echo.
 pause
